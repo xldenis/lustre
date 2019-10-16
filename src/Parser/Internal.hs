@@ -1,119 +1,94 @@
-{-# LANGUAGE TypeFamilies, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Parser.Internal
   ( module Parser.Internal
-  , LexToken(..)
-  , OpTok(..)
-  , runLexer
   ) where
 
-import Control.Monad (void)
-
-import Data.Proxy
-import Data.Void
-import Data.List.NonEmpty (NonEmpty (..))
-
-import qualified Data.List          as DL
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Set           as Set
-
-import Text.Megaparsec
+import           Text.Megaparsec
+import           Text.Megaparsec.Char
+import qualified Text.Megaparsec.Char.Lexer as L
 
 import Lexer
 import Name
 
-newtype TokStream = MkStream
-  { unStream :: [WithPos LexToken]
-  } deriving (Show, Eq)
+import Control.Monad (void)
+import Data.Void
+import Data.Text (Text)
 
-instance Stream TokStream where
-  type Token TokStream = WithPos LexToken
-  type Tokens TokStream = [WithPos LexToken]
+type Parser = Parsec Void Text
 
-  tokenToChunk Proxy x = [x]
-  tokensToChunk Proxy xs = xs
-  chunkToTokens Proxy = id
-  chunkLength Proxy = length
-  chunkEmpty Proxy = null
+scn :: Parser ()
+scn = L.space (void spaceChar) (L.skipLineComment "#") empty
 
-  take1_ (MkStream []) = Nothing
-  take1_ (MkStream (t:ts)) = Just (t, MkStream ts)
+sc :: Parser ()
+sc = L.space (void $ oneOf [' ', '\t']) (L.skipLineComment "#") empty
 
-  takeN_ n (MkStream s)
-    | n <= 0    = Just ([], MkStream s)
-    | null s    = Nothing
-    | otherwise =
-        let (x, s') = splitAt n s
-        in Just (x, MkStream s')
-  takeWhile_ f (MkStream s) =
-    let (x, s') = DL.span f s
-    in (x, MkStream s')
-  showTokens Proxy = DL.intercalate ", "
-    . NE.toList
-    . fmap (show . tokenVal)
-  reachOffset o pst@PosState {..} =
-    case drop (o - pstateOffset) (unStream pstateInput) of
-      [] ->
-        ( pstateSourcePos
-        , "<missing input>"
-        , pst { pstateInput = MkStream [] }
-        )
-      (x:xs) ->
-        ( startPos x
-        , "<missing input>"
-        , pst { pstateInput = MkStream (x:xs) }
-        )
+lexeme :: Parser a -> Parser a
+lexeme = L.lexeme scn
 
--- showMyToken :: MyToken -> String
--- showMyToken = \case
---   (Int n)    -> show n
---   Plus       -> "+"
---   Mul        -> "*"
---   Div        -> "/"
---   OpenParen  -> "("
---   CloseParen -> ")"
+symbol :: Text -> Parser Text
+symbol = L.symbol scn
 
-type Parser = Parsec Void TokStream
-
-liftTok :: LexToken -> WithPos LexToken
-liftTok tok = WithPos pos tok
-  where
-    pos = initialPos ""
-
-tok :: LexToken -> Parser LexToken
-tok c = token test (Set.singleton . Tokens . nes . liftTok $ c)
-  where
-    test wpos@(WithPos _ x) =
-      if x == c
-        then Just x
-        else Nothing
-    nes x = x :| []
-
-op :: OpTok -> Parser ()
-op = void . tok . Op
-
-integer :: Parser Int
-integer = token test Set.empty <?> "integer"
-  where
-    test (WithPos _ (LInt n)) = Just n
-    test _ = Nothing
-
-float :: Parser Float
-float = token test Set.empty <?> "float"
-  where
-    test (WithPos _ (LFloat n)) = Just n
-    test _ = Nothing
-
+reserved :: [String]
+reserved = ["if", "then", "else", "end", "node", "returns"]
 
 ident :: Parser Ident
-ident = token test Set.empty <?> "identifier"
+ident = p >>= res
   where
-    test (WithPos _ (Ident n)) = Just $ MkI n
-    test _ = Nothing
+  p = label "identifier" . lexeme $ ((:) <$> lowerChar <*> many identLetters)
+  res i = if i `elem` reserved then
+      fail $ "The reserved word `" ++ i ++ "` cannot be used as an identifier."
+    else
+      return (MkI i)
 
-string :: String -> Parser ()
-string s = token test (Set.singleton . Tokens . nes . liftTok $ Ident s) <?> s
-  where
-    test (WithPos _ (Ident n)) | s == n = Just ()
-    test _ = Nothing
+  identLetters = oneOf letters
 
-    nes x = x :| []
+  letters :: String
+  letters = "_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+parens :: Parser a -> Parser a
+parens = between (lexeme $ char '(') (lexeme $ char ')')
+
+float :: Parser Float
+float = lexeme L.float
+
+integer :: Parser Int
+integer = lexeme L.decimal
+
+_Returns = symbol "returns"
+_End    = symbol "end"
+_Node   = symbol "node"
+_Let    = symbol "let"
+_Var    = symbol "var"
+_Equals = symbol "="
+_Semi   = symbol ";"
+_Comma  = symbol ","
+_Colon  = symbol ":"
+
+_False = symbol "false"
+_True  = symbol "true"
+_Arr   = symbol "->"
+
+_If = symbol "if"
+_Then = symbol "then"
+_Else = symbol "else"
+
+_Bool = symbol "bool"
+_Int  = symbol "int"
+_Float = symbol "float"
+
+{- Operators -}
+_Neq = symbol "!="
+_Eq  = symbol "=="
+_Ge  = symbol ">="
+_Gt  = symbol ">"
+_Le  = symbol "<="
+_Lt  = symbol "<"
+
+_And = symbol "&&"
+_Or = symbol "||"
+
+_Add = symbol "+"
+_Sub = symbol "-"
+_Mul = symbol "*"
+_Div = symbol "/"
+_Mod = symbol "%"

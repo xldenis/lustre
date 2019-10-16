@@ -1,4 +1,8 @@
-module Parser where
+module Parser
+  ( node
+  , parse
+  , errorBundlePretty
+  ) where
 
 import Data.Bifunctor
 
@@ -9,121 +13,114 @@ import Parser.Internal
 import Name
 import Syntax
 
-parse' :: Parser a -> String -> Either String a
-parse' parser str =
-  runLexer "" str >>= first errorBundlePretty . parse (parser <* eof) "" . MkStream
-
 node :: Parser Node
 node = do
-  tok Node
+  _Node
   nm <- ident
   inps <- argList
-  tok Returns
+  _Returns
   outs <- argList
-  tok Semi
+  _Semi
   vars <- variables
 
-  tok Let
+  _Let
   eqns <- equations
-  tok End
+  _End
   pure $ MkNode nm inps outs vars eqns
 
 variables = do
-  tok LVar
+  _Var
 
-  vars <- varGroup `sepEndBy1` tok Semi
+  vars <- varGroup `sepEndBy1` _Semi
 
   pure (concat vars)
   where
-  varGroup = do
-    vars <- ident `sepBy1` tok Comma
-    tok Colon
+  varGroup = try $ do
+    vars <- ident `sepBy1` _Comma
+    _Colon
     ty <- typeP
 
     return (map (\v -> (v, ty)) vars)
 
-parens :: Parser a -> Parser a
-parens = between (tok LParen) (tok RParen)
-
 argList :: Parser [(Ident, Type)]
-argList = parens (arg `sepBy1` (tok Comma))
+argList = parens (arg `sepBy1` _Comma)
   where
   arg = do
     id <- ident
-    tok Colon
+    _Colon
     ty <- typeP
 
     pure (id, ty)
 
 equations :: Parser [Equation]
-equations = equation `sepEndBy1` tok Semi
+equations = equation `sepEndBy1` _Semi
 
 equation :: Parser Equation
 equation = do
-  pats <- (pure <$> ident) <|> parens (sepBy1 ident (tok Comma))
-  tok Equal
+  pats <- (pure <$> try ident) <|> parens (sepBy1 ident _Comma)
+  _Equals
   exp <- expression
 
   pure $ MkEq pats exp
 
 expression :: Parser Expression
 expression = makeExprParser primExpr
-  [ [ binary LMul (BinOp Mul)
-    , binary LMul (BinOp Div)
-    , binary LMod (BinOp Mod)
+  [ [ binary _Mul (BinOp Mul)
+    , binary _Mul (BinOp Div)
+    , binary _Mod (BinOp Mod)
     ]
-  , [ binary LAdd (BinOp Add)
-    , binary LSub (BinOp Sub)
+  , [ binary _Add (BinOp Add)
+    , binary _Sub (BinOp Sub)
     ]
-  , [ binary LLe (BinOp Le)
-    , binary LLt (BinOp Lt)
-    , binary LGt (BinOp Gt)
-    , binary LGe (BinOp Ge)
-    , binary LEq (BinOp Eq)
-    , binary LNeq (BinOp Neq)
+  , [ binary _Le (BinOp Le)
+    , binary _Lt (BinOp Lt)
+    , binary _Gt (BinOp Gt)
+    , binary _Ge (BinOp Ge)
+    , binary _Eq (BinOp Eq)
+    , binary _Neq (BinOp Neq)
     ]
   , [ Prefix arrP
     ]
   ]
   where
 
+  binary  name f = InfixL  (f <$ name)
+  prefix  name f = Prefix  (f <$ symbol name)
+
   primExpr = choice
     [ Const <$> constP
     , parens expression
-    , Var <$> ident
     , ifte
+    , Var <$> ident
     ]
 
   ifte = do
-    tok If
+    _If
     c <- expression
-    tok Then
+    _Then
     a <- expression
-    tok Else
+    _Else
     b <- expression
 
     pure (Ifte c a b)
 
   arrP = try $ do
     c <- constP
-    op LArr
+    _Arr
     pure (Arr c)
-
-  binary  name f = InfixL  (f <$ op name)
-  prefix  name f = Prefix  (f <$ op name)
 
 constP :: Parser Const
 constP = choice
-  [ Int <$> integer
-  , tok LTrue *> pure (Bool True)
-  , tok LFalse *> pure (Bool False)
+  [ Int   <$> integer
+  , _True  *> pure (Bool True)
+  , _False *> pure (Bool False)
   , Float <$> float
   ]
 
 typeP :: Parser Type
 typeP = do
   choice
-    [ string "bool" *> pure TBool
-    , string "int"  *> pure TInt
-    , string "float" *> pure TFloat
+    [ _Bool  *> pure TBool
+    , _Int   *> pure TInt
+    , _Float *> pure TFloat
     ]
