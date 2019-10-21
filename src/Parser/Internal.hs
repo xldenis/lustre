@@ -7,7 +7,6 @@ import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
-import Lexer
 import Name
 
 import Control.Monad (void)
@@ -29,7 +28,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol scn
 
 reserved :: [String]
-reserved = ["if", "then", "else", "end", "node", "returns"]
+reserved = ["if", "then", "else", "end", "node", "returns", "merge", "when"]
 
 ident :: Parser Ident
 ident = p >>= res
@@ -68,9 +67,8 @@ _False = symbol "false"
 _True  = symbol "true"
 _Arr   = symbol "->"
 
-_If = symbol "if"
-_Then = symbol "then"
-_Else = symbol "else"
+_Merge = symbol "merge"
+_When  = symbol "when"
 
 _Bool = symbol "bool"
 _Int  = symbol "int"

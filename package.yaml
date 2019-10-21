@@ -32,7 +32,10 @@ library:
   - containers
   - parser-combinators
   - prettyprinter
+  - mtl
+  - unordered-containers
 
+  ghc-options: -Wall
   build-tools: alex
 
 executables:

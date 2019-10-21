@@ -13,7 +13,7 @@ import Parser.Internal
 import Name
 import Syntax
 
-node :: Parser Node
+node :: Parser PreNode
 node = do
   _Node
   nm <- ident
@@ -21,7 +21,7 @@ node = do
   _Returns
   outs <- argList
   _Semi
-  vars <- variables
+  vars <- try variables <|> pure []
 
   _Let
   eqns <- equations
@@ -52,10 +52,10 @@ argList = parens (arg `sepBy1` _Comma)
 
     pure (id, ty)
 
-equations :: Parser [Equation]
+equations :: Parser [PreEquation]
 equations = equation `sepEndBy1` _Semi
 
-equation :: Parser Equation
+equation :: Parser PreEquation
 equation = do
   pats <- (pure <$> try ident) <|> parens (sepBy1 ident _Comma)
   _Equals
@@ -66,20 +66,22 @@ equation = do
 expression :: Parser Expression
 expression = makeExprParser primExpr
   [ [ binary _Mul (BinOp Mul)
-    , binary _Mul (BinOp Div)
+    , binary _Div (BinOp Div)
     , binary _Mod (BinOp Mod)
     ]
   , [ binary _Add (BinOp Add)
     , binary _Sub (BinOp Sub)
     ]
-  , [ binary _Le (BinOp Le)
-    , binary _Lt (BinOp Lt)
-    , binary _Gt (BinOp Gt)
-    , binary _Ge (BinOp Ge)
-    , binary _Eq (BinOp Eq)
+  , [ binary _Le  (BinOp Le)
+    , binary _Lt  (BinOp Lt)
+    , binary _Gt  (BinOp Gt)
+    , binary _Ge  (BinOp Ge)
+    , binary _Eq  (BinOp Eq)
     , binary _Neq (BinOp Neq)
     ]
   , [ Prefix arrP
+    ]
+  , [ Postfix whenP
     ]
   ]
   where
@@ -90,24 +92,32 @@ expression = makeExprParser primExpr
   primExpr = choice
     [ Const <$> constP
     , parens expression
-    , ifte
+    , merge
     , Var <$> ident
     ]
 
-  ifte = do
-    _If
-    c <- expression
-    _Then
-    a <- expression
-    _Else
-    b <- expression
+  merge = do
+    _Merge
+    x <- ident
 
-    pure (Ifte c a b)
+    lExp <- parens (_True >> _Arr >> expression)
+    rExp <- parens (_False >> _Arr >> expression)
+
+    pure (Merge x lExp rExp)
 
   arrP = try $ do
     c <- constP
     _Arr
     pure (Arr c)
+
+  whenP = do
+    _When
+    c <- choice
+      [ _True >> pure True
+      , _False >> pure False
+      ]
+    x <- ident
+    pure (\e -> When e c x)
 
 constP :: Parser Const
 constP = choice
