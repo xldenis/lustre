@@ -1,0 +1,16 @@
+node omg (x : int) returns (odd : bool, even : bool) ;
+let
+  odd = x % 2 == 1;
+  even = x % 2 == 0;
+end
+
+node cycle (x : int) returns (o : int) ;
+var t : bool;
+    e : bool;
+    clk : bool;
+let
+  clk = true;
+  (t, e) = omg(x) every clk;
+
+end
+

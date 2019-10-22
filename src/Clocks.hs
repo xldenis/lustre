@@ -18,7 +18,8 @@ import           Name
 import           Syntax               hiding (Expression (..))
 import qualified Syntax               as S (Expression (..))
 
-newtype ClockEnv = H { unClockEnv :: [(Ident, Clock)] }
+newtype ClockEnv = H
+  { unClockEnv :: [(Ident, Clock)] }
   deriving (Show, Eq, Semigroup, Monoid)
 
 instance Partial Clock where
@@ -28,10 +29,12 @@ instance Partial Clock where
 
   unknowns (CMeta i)  = [i]
   unknowns (On c _ _) = unknowns c
+  unknowns (CTuple c) = c >>= unknowns
   unknowns _          = []
 
   ($?) sub m@(CMeta i)  = fromMaybe m $ M.lookup i (runSubstitution sub)
   ($?) sub (On clk c x) = On (sub $? clk) c x
+  ($?) sub (CTuple xs)  = CTuple (map (sub $?) xs)
   ($?) _ Base           = Base
 
 instance UnificationError Clock ClockingError where
@@ -46,6 +49,8 @@ instance MonadError ClockingError m => MonadUnify ClockingError Clock (UnifyT Cl
     if s == t && x == y
     then c =?= d
     else throwError $ MismatchClocks a b
+  (=?=) (CTuple x) (CTuple y) =
+    mapM_ (\(x, y) -> x =?= y) (zip x y)
   (=?=) u t = throwError $ MismatchClocks u t
 
   getSubst = UnifyT $ gets unifyCurrentSubstitution
@@ -72,6 +77,7 @@ data ClockedExp c
   | Var Ident
   | Merge Ident (CAnn c) (CAnn c)
   | When (CAnn c) Bool Ident
+  | App Ident [CAnn c] Ident
   deriving (Show, Eq, Functor)
 
 type ClockAnn = CAnn Clock
@@ -84,6 +90,7 @@ eraseClocks (C _ (Not e))       = S.Not (eraseClocks e)
 eraseClocks (C _ (Var i))       = S.Var i
 eraseClocks (C _ (Merge i l r)) = S.Merge i (eraseClocks l) (eraseClocks r)
 eraseClocks (C _ (When e c x))  = S.When  (eraseClocks e) c x
+eraseClocks (C _ (App f arg a)) = S.App f (map eraseClocks arg) a
 
 withNames :: ClockingM m => [(Ident, Clock)] -> m a -> m a
 withNames nms action = do
@@ -99,11 +106,11 @@ lookupName i =
   Just t  -> pure t
   Nothing -> throwError $ UndefinedIdentClk i
 
-checkClock :: ClockingM m => Clock -> [Clock] -> m ()
-checkClock expected given =
-  case given of
-    [ck] -> ck =?= expected
-    cks  -> throwError (UnexpectedClockProduct cks expected)
+checkClock :: ClockingM m => Clock -> Clock -> m ()
+checkClock expected given = expected =?= given
+  -- case given of
+  --   [ck] -> ck =?= expected
+  --   cks  -> throwError (UnexpectedClockProduct cks expected)
 
 runClocking :: [PreNode] -> Either ClockingError [Node ClockAnn]
 runClocking ns =
@@ -133,36 +140,37 @@ clockOfEqn :: ClockingM m => PreEquation -> m (Equation ClockAnn)
 clockOfEqn (MkEq ids expr) = do
   idClocks <- mapM lookupName ids
   (e', expClocks) <- clockOfExpr expr
-  mapM_ (uncurry checkClock . second pure) (zip idClocks expClocks)
+
+  (toTuple idClocks) `checkClock` expClocks
 
   pure (MkEq ids e')
+  where toTuple [x] = x
+        toTuple xss = CTuple xss
 
-clockOfExpr :: ClockingM m => S.Expression -> m (ClockAnn, [Clock])
+clockOfExpr :: ClockingM m => S.Expression -> m (ClockAnn, Clock)
 clockOfExpr (S.Const c) = do
   clk <- fresh
-  pure (C clk (Const c), [clk])
+  pure (C clk (Const c), clk)
 clockOfExpr (S.Arr c e) = do
   (e', clk) <- clockOfExpr e
-  case clk of
-    [clk'] -> pure (C clk' (Arr c e'), [clk'])
-    _      -> throwError (TooManyClocks clk)
+
+  pure (C clk (Arr c e'), clk)
 clockOfExpr (S.BinOp o l r) = do
   (l', lClk) <- clockOfExpr l
   (r', rClk) <- clockOfExpr r
-  case lClk of
-    [clk] -> checkClock clk rClk >> pure (C clk (BinOp o l' r'), lClk)
-    clks  -> throwError (TooManyClocks clks)
+  lClk =?= rClk
+  pure (C lClk (BinOp o l' r'), lClk)
 clockOfExpr (S.Not e) = clockOfExpr e
 clockOfExpr (S.Var v) = do
   clk <- lookupName v
-  pure (C clk (Var v), [clk])
+  pure (C clk (Var v), clk)
 clockOfExpr (S.When e c x) = do
   xClk <- lookupName x
 
   (e', clk) <- clockOfExpr e
   checkClock xClk clk
 
-  pure (C (On xClk c x) (When e' c x), [On xClk c x])
+  pure (C (On xClk c x) (When e' c x), On xClk c x)
 clockOfExpr (S.Merge x l r) = do
   xClk <- lookupName x
 
@@ -172,6 +180,11 @@ clockOfExpr (S.Merge x l r) = do
   (r', rClk) <- clockOfExpr r
   checkClock (On xClk False x) rClk
 
-  pure (C xClk (Merge x l' r'), [xClk])
+  pure (C xClk (Merge x l' r'), xClk)
+clockOfExpr (S.App f args a) = do
+  lookupName a
+  (args', clks) <- unzip <$> mapM clockOfExpr args
+  ck' <- fresh
+  pure (C (CTuple clks) (App f args' a), ck')
 
 

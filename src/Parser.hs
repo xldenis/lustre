@@ -103,9 +103,16 @@ expression = makeExprParser primExpr
     [ Const <$> constP
     , parens expression
     , merge
+    , app
     , Var <$> ident
     ]
 
+  app = try $ do
+    f <- ident
+    args <- parens (expression `sepBy1` _Comma)
+    _Every
+    a <- ident
+    pure (App f args a)
   merge = do
     _Merge
     x <- ident

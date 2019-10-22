@@ -63,3 +63,9 @@ normalizeExpr (C clk (When e c x))  = do
   e' <- normalizeExpr e
 
   pure (C clk (When e' c x))
+normalizeExpr (C clk (App f args a)) = do
+  args' <- mapM normalizeExpr args
+
+  e <- emit (C clk (App f args' a))
+
+  pure e

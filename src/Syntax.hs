@@ -59,6 +59,7 @@ data Clock
   = Base
   | On Clock Bool Ident
   | CMeta Int
+  | CTuple [Clock]
   deriving (Show, Eq)
 
 data Expression
@@ -69,7 +70,7 @@ data Expression
   | Var Ident
   | Merge Ident Expression Expression
   | When Expression Bool Ident
-  | App Ident [Expression]
+  | App Ident [Expression] Ident
   deriving (Show, Eq)
 
 instance Pretty Expression where
@@ -93,7 +94,7 @@ instance Pretty Expression where
   pretty (When e c x) = pretty e <+> pretty "when" <+> pBool c <+> pretty x
     where pBool True  = pretty "true"
           pBool False = pretty "false"
-
+  pretty (App f args a) = pretty f <> tupled (map pretty args) <+> pretty "every" <+> pretty a
 instance Pretty Ident where
   pretty (MkI i) = pretty i
 

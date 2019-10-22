@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE DerivingVia                #-}
 module Typing where
 
 import           Name
@@ -22,8 +23,16 @@ import           Control.Monad.State
 data VarRole = Write | Read
   deriving (Show, Eq)
 
-newtype Environment = Gamma { unEnv :: [(Ident, (VarRole, Type))] }
-  deriving (Show, Eq, Monoid, Semigroup)
+data Environment = MkE
+  { gamma :: [(Ident, (VarRole, Type))]
+  , delta :: [(Ident, ([Type], [Type]))]
+  } deriving (Show, Eq)
+
+instance Semigroup Environment where
+  (<>) a b = MkE (gamma a <> gamma b) (delta a <> delta b)
+
+instance Monoid Environment where
+  mempty = MkE mempty mempty
 
 data TypecheckError
   = TypeMismatch Type Type -- ^ expected type t but got type u
@@ -37,32 +46,39 @@ data TypecheckError
 type TypecheckM m = (MonadState Environment m, MonadError TypecheckError m)
 
 runTyping :: [PreNode] -> Either TypecheckError [PreNode]
-runTyping n = flip evalState (Gamma []) . runExceptT $ typecheckNodes n
+runTyping n = flip evalState mempty . runExceptT $ typecheckNodes n
 
 withNames :: TypecheckM m => [(Ident, (VarRole, Type))] -> m a -> m a
 withNames nms action = do
   env <- get
-  put (Gamma nms <> env)
+  put $ MkE nms mempty <> env
   res <- action
   put env
   return res
 
 lookupName :: TypecheckM m => Ident -> m Type
 lookupName i =
-  gets (lookup i . unEnv) >>= \case
+  gets (lookup i . gamma) >>= \case
   Just (_, t) -> pure t
   Nothing -> throwError $ UndefinedIdent i
 
 lookupWriteName :: TypecheckM m => Ident -> m Type
 lookupWriteName i =
-  gets (lookup i . unEnv) >>= \case
+  gets (lookup i . gamma) >>= \case
   Just (Write, t) -> pure t
   Just (_, _) -> throwError $ WriteToInput i
   Nothing -> throwError $ UndefinedIdent i
 
+lookupFunction :: TypecheckM m => Ident -> m ([Type], [Type])
+lookupFunction i =
+  gets (lookup i . delta) >>= \case
+  Just x -> pure x
+  Nothing -> throwError $ UndefinedIdent i
+
 addNode :: TypecheckM m => PreNode -> m ()
-addNode node =
-  pure ()
+addNode (MkNode{..}) = do
+  let pair = (nodeName, (map snd nodeInputs, map snd nodeOutputs))
+  modify $ \s -> MkE mempty [pair] <> s
 
 typecheckNodes :: TypecheckM m => [PreNode] -> m [PreNode]
 typecheckNodes = mapM (\n -> typecheckNode n <* addNode n)
@@ -131,7 +147,17 @@ typecheckExpr (When e c x) = do
   (e', ety) <- typecheckExpr e
 
   pure (When e' c x, ety)
+typecheckExpr (App f args a) = do
+  (atys, rettys) <- lookupFunction f
+  (args', argtys) <- unzip <$> mapM typecheckExpr args
 
+  go atys (concat argtys)
+
+  pure (App f args' a, rettys)
+  where
+  go (g : gs) (e : es) = if g == e then go gs es else throwError (TypeMismatch g e)
+  go [] [] = pure ()
+  go _  _  = throwError undefined
 data BinOpTy
   = Pred
   | Arith

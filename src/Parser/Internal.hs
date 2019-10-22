@@ -28,7 +28,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol scn
 
 reserved :: [String]
-reserved = ["if", "then", "else", "end", "node", "returns", "merge", "when"]
+reserved = ["if", "then", "else", "end", "node", "returns", "merge", "when", "every"]
 
 ident :: Parser Ident
 ident = p >>= res
@@ -69,6 +69,7 @@ _Arr   = symbol "->"
 
 _Merge = symbol "merge"
 _When  = symbol "when"
+_Every = symbol "every"
 
 _Bool = symbol "bool"
 _Int  = symbol "int"
