@@ -1,0 +1,9 @@
+node counting(tick : bool, top : bool) returns (o : int)
+var v : int;
+let
+  o = merge tick (true -> v when true tick)
+                 (false -> ((0 -> o) + v) when false tick) ;
+  v = merge top  (true -> (1 when true top))
+                 (false -> (0 when false top))
+end
+

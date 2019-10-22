@@ -1,11 +1,16 @@
-{-# LANGUAGE ConstraintKinds, RecordWildCards, FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, TupleSections #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE TupleSections              #-}
 module Typing where
 
-import Name
-import Syntax
+import           Name
+import           Syntax
 
-import Control.Monad.State
-import Control.Monad.Except
+import           Control.Monad.Except
+import           Control.Monad.State
 
 {-
 
@@ -32,7 +37,7 @@ data TypecheckError
 type TypecheckM m = (MonadState Environment m, MonadError TypecheckError m)
 
 runTyping :: [PreNode] -> Either TypecheckError [PreNode]
-runTyping n = (flip evalState (Gamma [])) . runExceptT $ typecheckNodes n
+runTyping n = flip evalState (Gamma []) . runExceptT $ typecheckNodes n
 
 withNames :: TypecheckM m => [(Ident, (VarRole, Type))] -> m a -> m a
 withNames nms action = do
@@ -43,27 +48,27 @@ withNames nms action = do
   return res
 
 lookupName :: TypecheckM m => Ident -> m Type
-lookupName i = do
+lookupName i =
   gets (lookup i . unEnv) >>= \case
-    Just (_, t) -> pure t
-    Nothing -> throwError $ UndefinedIdent i
+  Just (_, t) -> pure t
+  Nothing -> throwError $ UndefinedIdent i
 
 lookupWriteName :: TypecheckM m => Ident -> m Type
-lookupWriteName i = do
+lookupWriteName i =
   gets (lookup i . unEnv) >>= \case
-    Just (Write, t) -> pure t
-    Just (_, _) -> throwError $ WriteToInput i
-    Nothing -> throwError $ UndefinedIdent i
+  Just (Write, t) -> pure t
+  Just (_, _) -> throwError $ WriteToInput i
+  Nothing -> throwError $ UndefinedIdent i
 
 addNode :: TypecheckM m => PreNode -> m ()
-addNode node = do
+addNode node =
   pure ()
 
 typecheckNodes :: TypecheckM m => [PreNode] -> m [PreNode]
 typecheckNodes = mapM (\n -> typecheckNode n <* addNode n)
 
 typecheckNode :: TypecheckM m => PreNode -> m PreNode
-typecheckNode n@(MkNode{..}) = do
+typecheckNode n@MkNode{..} = do
   eqns' <- withNames (map (fmap (Read,)) nodeInputs) $
     withNames (map (fmap (Write,)) (nodeOutputs <> nodeVariables)) $
      mapM typecheckEqn nodeEquations
@@ -100,7 +105,7 @@ typecheckExpr (Not e) = do
   (e', ety) <- typecheckExpr e
   checkType TBool ety
   pure (Not e', ety)
-typecheckExpr (Var i) = lookupName i >>= pure . (Var i,) . pure
+typecheckExpr (Var i) = (Var i,) . pure <$> lookupName i
 typecheckExpr (BinOp op l r) = do
   (l', lty) <- typecheckExpr l
   (r', rty) <- typecheckExpr r

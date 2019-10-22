@@ -1,10 +1,11 @@
-{-# LANGUAGE DeriveFunctor, RecordWildCards #-}
+{-# LANGUAGE DeriveFunctor   #-}
+{-# LANGUAGE RecordWildCards #-}
 module Syntax where
 
-import Name
-import Pretty
+import           Name
+import           Pretty
 
-import Data.List
+import           Data.List
 
 data Node e = MkNode
   { nodeName      :: Ident
@@ -15,7 +16,7 @@ data Node e = MkNode
   } deriving (Show, Eq, Functor)
 
 instance Pretty e => Pretty (Node e) where
-  pretty (MkNode{..}) =
+  pretty MkNode{..} =
     pretty "node" <+> pretty nodeName <+> prettyArgList nodeInputs
     <+> pretty "returns" <+> prettyArgList nodeOutputs <> semi
     `above` pretty "var" <+> prettyVars
@@ -26,7 +27,7 @@ instance Pretty e => Pretty (Node e) where
     prettyArgList list = tupled $ map (\(i, ty) -> pretty i <+> pretty ":" <+> pretty ty) list
     prettyVars = let
       groupedVars = groupBy (\a b -> snd a == snd b) nodeVariables
-      in align $ vsep $ (map prettyVarGroup groupedVars)
+      in align $ vsep (map prettyVarGroup groupedVars)
 
     prettyVarGroup :: [(Ident, Type)] -> Doc a
     prettyVarGroup grps = let
@@ -68,6 +69,7 @@ data Expression
   | Var Ident
   | Merge Ident Expression Expression
   | When Expression Bool Ident
+  | App Ident [Expression]
   deriving (Show, Eq)
 
 instance Pretty Expression where
@@ -88,15 +90,18 @@ instance Pretty Expression where
     pretty "merge" <+> pretty i
     <+> parens (pretty "true"  <+> pretty "->" <+> pretty l)
     <+> parens (pretty "false" <+> pretty "->" <+> pretty r)
-  pretty (When e c x) = pretty e <+> pretty "when" <+> pretty c <+> pretty x
+  pretty (When e c x) = pretty e <+> pretty "when" <+> pBool c <+> pretty x
+    where pBool True  = pretty "true"
+          pBool False = pretty "false"
 
 instance Pretty Ident where
   pretty (MkI i) = pretty i
 
 instance Pretty Const where
-  pretty (Int i) = pretty i
-  pretty (Bool b) = pretty b
-  pretty (Float f) = pretty f
+  pretty (Int i)      = pretty i
+  pretty (Bool True)  = pretty "true"
+  pretty (Bool False) = pretty "false"
+  pretty (Float f)    = pretty f
 
 data Op
   = Eq  | Neq | Lt  | Le  | Gt | Ge
@@ -130,6 +135,7 @@ instance Pretty Op where
   pretty Mod = pretty "%"
   pretty And = pretty "&&"
   pretty Or  = pretty "||"
+
 data Const
   = Int Int
   | Bool Bool

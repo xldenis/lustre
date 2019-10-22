@@ -34,8 +34,11 @@ library:
   - prettyprinter
   - mtl
   - unordered-containers
+  - hashable
 
-  ghc-options: -Wall
+  ghc-options:
+  - -Wall
+  - -Wno-unused-do-bind
   build-tools: alex
 
 executables:

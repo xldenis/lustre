@@ -7,11 +7,11 @@ import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
-import Name
+import           Name
 
-import Control.Monad (void)
-import Data.Void
-import Data.Text (Text)
+import           Control.Monad              (void)
+import           Data.Text                  (Text)
+import           Data.Void
 
 type Parser = Parsec Void Text
 
@@ -86,7 +86,7 @@ _And = symbol "&&"
 _Or = symbol "||"
 
 _Add = symbol "+"
-_Sub = symbol "-"
+_Sub = symbol "-" <* notFollowedBy ">"
 _Mul = symbol "*"
 _Div = symbol "/"
 _Mod = symbol "%"

@@ -1,0 +1,7 @@
+node example (x : int) returns (o : int) ;
+var t : bool;
+let
+  o = merge t (true -> x when true t) (false -> x + 1 when false t) ;
+  t = x % 2 == 0;
+end
+

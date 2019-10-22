@@ -2,16 +2,28 @@ module Parser
   ( node
   , parse
   , errorBundlePretty
+  , parseFromFile
+  , nodes
   ) where
 
-import Data.Bifunctor
+import           Data.Bifunctor
 
-import Text.Megaparsec
-import Control.Monad.Combinators.Expr
+import           Control.Monad.Combinators.Expr
+import           Data.Text                      (Text)
+import qualified Data.Text.IO                   as T (readFile)
+import           Data.Void
+import           Data.Functor
+import           Text.Megaparsec
 
-import Parser.Internal
-import Name
-import Syntax
+import           Name
+import           Parser.Internal
+import           Syntax
+
+parseFromFile :: Parser a -> FilePath -> IO (Either (ParseErrorBundle Text Void) a)
+parseFromFile p file = runParser p file <$> T.readFile file
+
+nodes :: Parser [PreNode]
+nodes = some node
 
 node :: Parser PreNode
 node = do
@@ -59,9 +71,7 @@ equation :: Parser PreEquation
 equation = do
   pats <- (pure <$> try ident) <|> parens (sepBy1 ident _Comma)
   _Equals
-  exp <- expression
-
-  pure $ MkEq pats exp
+  MkEq pats <$> expression
 
 expression :: Parser Expression
 expression = makeExprParser primExpr
@@ -70,7 +80,7 @@ expression = makeExprParser primExpr
     , binary _Mod (BinOp Mod)
     ]
   , [ binary _Add (BinOp Add)
-    , binary _Sub (BinOp Sub)
+    , binary (try _Sub) (BinOp Sub)
     ]
   , [ binary _Le  (BinOp Le)
     , binary _Lt  (BinOp Lt)
@@ -122,15 +132,15 @@ expression = makeExprParser primExpr
 constP :: Parser Const
 constP = choice
   [ Int   <$> integer
-  , _True  *> pure (Bool True)
-  , _False *> pure (Bool False)
+  , _True  $> (Bool True)
+  , _False $> (Bool False)
   , Float <$> float
   ]
 
 typeP :: Parser Type
-typeP = do
+typeP =
   choice
-    [ _Bool  *> pure TBool
-    , _Int   *> pure TInt
-    , _Float *> pure TFloat
-    ]
+  [ _Bool  *> pure TBool
+  , _Int   *> pure TInt
+  , _Float *> pure TFloat
+  ]

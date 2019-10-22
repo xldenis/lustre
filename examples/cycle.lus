@@ -1,0 +1,7 @@
+node cycle (x : int) returns (o : int) ;
+var t : int;
+let
+  t = o - 1 ;
+  o = t + 1;
+end
+

@@ -1,18 +1,22 @@
-{-# LANGUAGE ConstraintKinds, FlexibleContexts,
-  GeneralizedNewtypeDeriving, LambdaCase, RecordWildCards,
-  DeriveFunctor, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE RecordWildCards            #-}
 module Clocks where
 
-import Control.Monad.Except
-import Control.Monad.State
+import           Control.Monad.Except
+import           Control.Monad.State
 import           Control.Monad.Unify
-import           Syntax hiding (Expression(..))
-import qualified Syntax as S (Expression(..))
-import Name
-
-import Data.Bifunctor
-import qualified Data.HashMap.Strict as M
-import Data.Maybe
+import           Data.Bifunctor
+import qualified Data.HashMap.Strict  as M
+import           Data.Maybe
+import           Name
+import           Syntax               hiding (Expression (..))
+import qualified Syntax               as S (Expression (..))
 
 newtype ClockEnv = H { unClockEnv :: [(Ident, Clock)] }
   deriving (Show, Eq, Semigroup, Monoid)
@@ -20,15 +24,15 @@ newtype ClockEnv = H { unClockEnv :: [(Ident, Clock)] }
 instance Partial Clock where
   unknown = CMeta
   isUnknown (CMeta i) = Just i
-  isUnknown _ = Nothing
+  isUnknown _         = Nothing
 
-  unknowns (CMeta i) = [i]
+  unknowns (CMeta i)  = [i]
   unknowns (On c _ _) = unknowns c
-  unknowns _ = []
+  unknowns _          = []
 
-  ($?) sub m@(CMeta i) = fromMaybe m $ M.lookup i (runSubstitution sub)
+  ($?) sub m@(CMeta i)  = fromMaybe m $ M.lookup i (runSubstitution sub)
   ($?) sub (On clk c x) = On (sub $? clk) c x
-  ($?) _ Base = Base
+  ($?) _ Base           = Base
 
 instance UnificationError Clock ClockingError where
   occursCheckFailed = ClockOccursCheck
@@ -90,40 +94,40 @@ withNames nms action = do
   return res
 
 lookupName :: ClockingM m => Ident -> m Clock
-lookupName i = do
+lookupName i =
   gets (lookup i . unClockEnv) >>= \case
-    Just t  -> pure t
-    Nothing -> throwError $ UndefinedIdentClk i
+  Just t  -> pure t
+  Nothing -> throwError $ UndefinedIdentClk i
 
 checkClock :: ClockingM m => Clock -> [Clock] -> m ()
 checkClock expected given =
   case given of
     [ck] -> ck =?= expected
-    cks -> throwError (UnexpectedClockProduct cks expected)
+    cks  -> throwError (UnexpectedClockProduct cks expected)
 
 runClocking :: [PreNode] -> Either ClockingError [Node ClockAnn]
 runClocking ns =
   fmap fst .
-  (flip evalState mempty) .
+  flip evalState mempty .
   runExceptT .
   runUnify (defaultUnifyState :: UnifyState Clock)
-  $ (mapM clockOfNode ns)
+  $ mapM clockOfNode ns
 
-addNode :: ClockingM m => (Node ClockAnn) -> m ()
-addNode _ = do
+addNode :: ClockingM m => Node ClockAnn -> m ()
+addNode _ =
   pure ()
 
 clockOfNode :: ClockingM m => PreNode -> m (Node ClockAnn)
-clockOfNode n@(MkNode{..}) = do
+clockOfNode n@MkNode{..} = do
   varClocks <- mapM (\(n,_) -> (,) n <$> fresh) nodeVariables
   withNames varClocks $ withNames (map (fmap (const Base)) $ nodeInputs <> nodeOutputs) $ do
     eqns' <- mapM clockOfEqn nodeEquations
 
-    return (fmap (fmap zonkMeta) $ n { nodeEquations = eqns'})
+    return ((fmap zonkMeta) <$> n { nodeEquations = eqns'})
   where
-  zonkMeta (CMeta _) = Base
+  zonkMeta (CMeta _)  = Base
   zonkMeta (On c t x) = On (zonkMeta c) t x
-  zonkMeta i = i
+  zonkMeta i          = i
 
 clockOfEqn :: ClockingM m => PreEquation -> m (Equation ClockAnn)
 clockOfEqn (MkEq ids expr) = do
@@ -141,13 +145,13 @@ clockOfExpr (S.Arr c e) = do
   (e', clk) <- clockOfExpr e
   case clk of
     [clk'] -> pure (C clk' (Arr c e'), [clk'])
-    _ -> throwError (TooManyClocks clk)
+    _      -> throwError (TooManyClocks clk)
 clockOfExpr (S.BinOp o l r) = do
   (l', lClk) <- clockOfExpr l
   (r', rClk) <- clockOfExpr r
   case lClk of
     [clk] -> checkClock clk rClk >> pure (C clk (BinOp o l' r'), lClk)
-    clks -> throwError (TooManyClocks clks)
+    clks  -> throwError (TooManyClocks clks)
 clockOfExpr (S.Not e) = clockOfExpr e
 clockOfExpr (S.Var v) = do
   clk <- lookupName v

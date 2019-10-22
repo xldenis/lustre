@@ -13,26 +13,26 @@
 --
 -----------------------------------------------------------------------------
 
+
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ImplicitPrelude #-}
+{-# LANGUAGE ImplicitPrelude            #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Control.Monad.Unify where
 
-import Data.Monoid
+import           Data.Monoid
 
-import Control.Applicative
-import Control.Monad.State
-import Control.Monad.Error.Class
-import Control.Monad.Fresh
-import Control.Monad.Writer
+import           Control.Applicative
+import           Control.Monad.Error.Class
+import           Control.Monad.Fresh
+import           Control.Monad.State
+import           Control.Monad.Writer
 
-import Data.HashMap.Strict as M
+import           Data.HashMap.Strict       as M
 
 -- |
 -- Untyped unification variables
@@ -76,7 +76,7 @@ data UnifyState t = UnifyState {
   -- |
   -- The next fresh unification variable
   --
-    unifyNextVar :: Int
+    unifyNextVar             :: Int
   -- |
   -- The current substitution
   --
@@ -132,7 +132,7 @@ substituteOne u t = Substitution $ M.singleton u t
   let current = sub $? unknown u
   case isUnknown current of
     Just u1 | u1 == u -> return ()
-    _ -> current =?= t
+    _       -> current =?= t
   s <- getSubst
   setSubst (substituteOne u t <> s)
 
@@ -143,7 +143,7 @@ occursCheck :: (UnificationError t e, Monad m, MonadError e m, Partial t, MonadU
 occursCheck u t =
   case isUnknown t of
     Nothing -> when (u `elem` unknowns t) $ throwError $ occursCheckFailed t
-    _ -> return ()
+    _       -> return ()
 
 instance Monad m => MonadFresh (UnifyT t m) where
   freshName = do
@@ -156,7 +156,6 @@ instance Monad m => MonadFresh (UnifyT t m) where
 --
 fresh :: (MonadFresh m, Monad m, Partial t, MonadUnify e t m) => m t
 fresh = do
-  u <- freshName
-  return $ unknown u
+  unknown <$> freshName
 
 
