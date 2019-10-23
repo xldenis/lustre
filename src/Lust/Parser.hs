@@ -1,9 +1,10 @@
-module Parser
+module Lust.Parser
   ( node
   , parse
   , errorBundlePretty
   , parseFromFile
   , nodes
+  , fromParseError
   ) where
 
 import           Data.Bifunctor
@@ -15,9 +16,19 @@ import           Data.Void
 import           Data.Functor
 import           Text.Megaparsec
 
-import           Name
-import           Parser.Internal
-import           Syntax
+import           Lust.Name
+import           Lust.Parser.Internal
+import           Lust.Syntax
+import           Lust.Error
+import           Lust.Pretty (pretty, viaShow)
+
+fromParseError :: ParseErrorBundle Text Void -> Error ann
+fromParseError err = Error
+  { errHeader = pretty "Parse Error"
+  , errKind = "parse"
+  , errSummary = viaShow (errorBundlePretty err)
+  , errHints = []
+  }
 
 parseFromFile :: Parser a -> FilePath -> IO (Either (ParseErrorBundle Text Void) a)
 parseFromFile p file = runParser p file <$> T.readFile file

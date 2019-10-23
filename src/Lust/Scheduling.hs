@@ -1,21 +1,28 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards  #-}
-module Scheduling where
+module Lust.Scheduling where
 
-import           Clocks
-import           Name
-import           Syntax               (Equation (..), Node (..))
 
 import           Data.Set             (Set)
 import qualified Data.Set             as Set
-
 import           Data.Graph
 import           Data.Hashable
-
 import           Data.Maybe           (fromJust, fromMaybe)
 import           Data.Foldable
+import           Data.Bifunctor       (first)
+
 import           Control.Monad.Except
 
+import           Lust.Clocks
+import           Lust.Name
+import           Lust.Syntax               (Equation (..), Node (..))
+import           Lust.Error
+import           Lust.Pretty
+
+{- | Return the immediate dependencies of an expression
+  this means anything not behind a delaying operation (fby).
+
+-}
 left :: ClockAnn -> Set Ident
 left (C _ (Const c))     = Set.empty
 left (C _ (Arr c e))     = Set.empty
@@ -34,13 +41,27 @@ data SchedulingError
   = CausalityViolation [Ident]
   deriving (Show, Eq)
 
-scheduleNode :: Node ClockAnn -> Either SchedulingError (Node ClockAnn)
-scheduleNode n@MkNode{..} = do
+fromSchedulingError (CausalityViolation ids) = Error
+  { errHeader = pretty "Scheduling Error"
+  , errSummary =
+      pretty "These variables form a cycle in their reads" <+> hsep (map pretty ids)
+  , errKind = "scheduling"
+  , errHints = []
+  }
+
+{-| Scheduling sorts the equations in order according to their syntactic dependencies
+    such that every operation that reads a value is evaluted after that value
+-}
+
+scheduleNode :: Node ClockAnn -> Either (Error ann) (Node ClockAnn)
+scheduleNode n@MkNode{..} = first fromSchedulingError $ do
   let comps = stronglyConnCompR (concatMap scheduleEq nodeEquations)
   eqns' <- foldrM checkSCC [] comps
 
   pure $ n { nodeEquations = eqns' }
   where
+
+  -- | Because an equation can be in
   checkSCC (AcyclicSCC (v, _, _)) acc = if v `elem` acc then pure acc else pure (v : acc)
   checkSCC (CyclicSCC vs) acc = throwError . CausalityViolation $ map (\(_, i, _) -> i) vs
 

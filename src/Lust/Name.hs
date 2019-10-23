@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Name where
+module Lust.Name where
 
 import           Data.Hashable
 

@@ -6,17 +6,20 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE RecordWildCards            #-}
-module Clocks where
+module Lust.Clocks where
 
-import           Control.Monad.Except
 import           Control.Monad.State
 import           Control.Monad.Unify
+
 import           Data.Bifunctor
 import qualified Data.HashMap.Strict  as M
 import           Data.Maybe
-import           Name
-import           Syntax               hiding (Expression (..))
-import qualified Syntax               as S (Expression (..))
+
+import           Lust.Name
+import           Lust.Syntax               hiding (Expression (..))
+import qualified Lust.Syntax               as S (Expression (..))
+import           Lust.Error
+import           Lust.Pretty
 
 newtype ClockEnv = H
   { unClockEnv :: [(Ident, Clock)] }
@@ -66,6 +69,18 @@ data ClockingError
   | ClockOccursCheck Clock
   deriving (Show, Eq)
 
+fromClockingError err = Error
+  { errHeader   = pretty "Clocking Error"
+  , errKind     = "clocking"
+  , errSummary  = render err
+  }
+  where
+
+  render (MismatchClocks ck1 ck2) =
+    pretty "Could not unify clock" <+> pretty ck1 <+> pretty "with" <+> pretty ck2
+  render (UndefinedIdentClk id) =
+    pretty "Could not find a boolean variable" <+> pretty id <+> pretty "in scope"
+
 data CAnn c = C c (ClockedExp c)
   deriving (Show, Eq, Functor)
 
@@ -108,15 +123,13 @@ lookupName i =
 
 checkClock :: ClockingM m => Clock -> Clock -> m ()
 checkClock expected given = expected =?= given
-  -- case given of
-  --   [ck] -> ck =?= expected
-  --   cks  -> throwError (UnexpectedClockProduct cks expected)
 
-runClocking :: [PreNode] -> Either ClockingError [Node ClockAnn]
+runClocking :: [PreNode] -> Either (Error ann) [Node ClockAnn]
 runClocking ns =
-  fmap fst .
+  first fromClockingError .
   flip evalState mempty .
   runExceptT .
+  fmap fst .
   runUnify (defaultUnifyState :: UnifyState Clock)
   $ mapM clockOfNode ns
 

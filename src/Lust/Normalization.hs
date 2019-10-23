@@ -1,14 +1,14 @@
 {-# LANGUAGE ConstraintKinds  #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards  #-}
-module Normalization where
+module Lust.Normalization where
 
 import           Control.Monad.Fresh
 import           Control.Monad.Writer
 
-import           Clocks
-import           Name
-import           Syntax               (Equation (..), Node (..))
+import           Lust.Clocks
+import           Lust.Name
+import           Lust.Syntax               (Equation (..), Node (..))
 
 type NormalizeM m = (MonadFresh m, MonadWriter [Equation ClockAnn] m)
 

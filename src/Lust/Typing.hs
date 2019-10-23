@@ -5,14 +5,15 @@
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE DerivingVia                #-}
-module Typing where
+module Lust.Typing where
 
-import           Name
-import           Syntax
+import           Lust.Name
+import           Lust.Syntax
+import           Lust.Error
+import           Lust.Pretty
 
-import           Control.Monad.Except
 import           Control.Monad.State
-
+import           Data.Bifunctor (first)
 {-
 
   Annotate binary expressions with their concrete type since they can
@@ -43,10 +44,38 @@ data TypecheckError
   | WriteToInput Ident
   deriving (Show, Eq)
 
+fromTypeError :: TypecheckError -> Error ann
+fromTypeError err = Error
+  { errHeader = pretty "Typing Error"
+  , errSummary = render err
+  , errKind = "typing"
+  , errHints = []
+  }
+  where
+  render (TypeMismatch e g)     =
+    pretty "Expected type" <+> pretty e <+> pretty "but got" <+> pretty g
+  render (IncorrectArity es gs) =
+    pretty "Expected a stream of type"
+    <+> tupled (map pretty es) <+> pretty "len" <+> pretty (length es)
+    <+> pretty "but got"
+    <+> tupled (map pretty gs) <+> pretty "len" <+> pretty (length es)
+  render (UndefinedIdent i) =
+    pretty "Undefined variable" <+> pretty i
+  render (MismatchedStream es gs) =
+    pretty "Expected a stream of type"
+    <+> tupled (map pretty es) <+> pretty "len" <+> pretty (length es)
+    <+> pretty "but got"
+    <+> tupled (map pretty gs) <+> pretty "len" <+> pretty (length es)
+  render (BadBinOpStream _ tys) =
+    pretty "Binary operations can't be applied to streams of type" <+> tupled (map pretty tys)
 type TypecheckM m = (MonadState Environment m, MonadError TypecheckError m)
 
-runTyping :: [PreNode] -> Either TypecheckError [PreNode]
-runTyping n = flip evalState mempty . runExceptT $ typecheckNodes n
+runTyping :: [PreNode] -> Either Error' [PreNode]
+runTyping n =
+    first fromTypeError
+  . flip evalState mempty
+  . runExceptT
+  $ typecheckNodes n
 
 withNames :: TypecheckM m => [(Ident, (VarRole, Type))] -> m a -> m a
 withNames nms action = do
@@ -158,6 +187,7 @@ typecheckExpr (App f args a) = do
   go (g : gs) (e : es) = if g == e then go gs es else throwError (TypeMismatch g e)
   go [] [] = pure ()
   go _  _  = throwError undefined
+
 data BinOpTy
   = Pred
   | Arith

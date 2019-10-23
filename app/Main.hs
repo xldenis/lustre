@@ -3,29 +3,29 @@ module Main where
 
 import qualified Data.Text as T
 
-import Parser
-import Typing
-import Clocks
-
-import Syntax
-
-import Pretty
-
-import Normalization
-import Scheduling
+import Lust.Parser
+import Lust.Typing
+import Lust.Clocks
+import Lust.Syntax
+import Lust.Pretty
+import Lust.Normalization
+import Lust.Scheduling
+import Lust.Error
 
 import Data.Bifunctor
+import Data.Function ((&))
+
 import Control.Category ((>>>))
 import Control.Monad ((>=>))
-import Data.Function ((&))
+
 import System.Environment
 
-compile :: [PreNode] -> Either String String
-compile = runTyping  >>> first show
-          >=> runClocking >>> first show
+compile :: [PreNode] -> Either Error' (String)
+compile = runTyping
+          >=> runClocking
           >=> (pure . runNormalize)
-          >=> (mapM scheduleNode) >>> first show
-          >>> second (show . pretty . map (fmap eraseClocks))
+          >=> (mapM scheduleNode)
+          >>> second (show . vcat . map (pretty . fmap eraseClocks))
 
 main :: IO ()
 main = do
@@ -50,5 +50,5 @@ main = do
   (f : _) <- getArgs
   x <- parseFromFile nodes f
   -- either (putStrLn . errorBundlePretty) (print . pretty) x
-  either putStrLn putStrLn (x & first errorBundlePretty >>= compile)
+  either (print . prettyError) putStrLn (x & first fromParseError >>= compile)
   pure ()

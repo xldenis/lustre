@@ -1,9 +1,9 @@
 {-# LANGUAGE DeriveFunctor   #-}
 {-# LANGUAGE RecordWildCards #-}
-module Syntax where
+module Lust.Syntax where
 
-import           Name
-import           Pretty
+import           Lust.Name
+import           Lust.Pretty
 
 import           Data.List
 
@@ -27,7 +27,9 @@ instance Pretty e => Pretty (Node e) where
     prettyArgList list = tupled $ map (\(i, ty) -> pretty i <+> pretty ":" <+> pretty ty) list
     prettyVars = let
       groupedVars = groupBy (\a b -> snd a == snd b) nodeVariables
-      in align $ vsep (map prettyVarGroup groupedVars)
+      in  if nodeVariables == []
+          then mempty
+          else align $ vsep (map prettyVarGroup groupedVars)
 
     prettyVarGroup :: [(Ident, Type)] -> Doc a
     prettyVarGroup grps = let
@@ -61,6 +63,12 @@ data Clock
   | CMeta Int
   | CTuple [Clock]
   deriving (Show, Eq)
+
+instance Pretty Clock where
+  pretty Base = pretty "base"
+  pretty (On ck b i) = pretty "on" <+> pretty ck <+> pBool b <+> pretty i
+    where pBool True  = pretty "true"
+          pBool False = pretty "false"
 
 data Expression
   = Const Const
