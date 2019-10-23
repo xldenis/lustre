@@ -16,8 +16,7 @@ import qualified Data.HashMap.Strict  as M
 import           Data.Maybe
 
 import           Lust.Name
-import           Lust.Syntax               hiding (Expression (..))
-import qualified Lust.Syntax               as S (Expression (..))
+import           Lust.Syntax
 import           Lust.Error
 import           Lust.Pretty
 
@@ -81,32 +80,6 @@ fromClockingError err = Error
   render (UndefinedIdentClk id) =
     pretty "Could not find a boolean variable" <+> pretty id <+> pretty "in scope"
 
-data CAnn c = C c (ClockedExp c)
-  deriving (Show, Eq, Functor)
-
-data ClockedExp c
-  = Const Const
-  | Arr Const (CAnn c)
-  | BinOp Op (CAnn c) (CAnn c)
-  | Not (CAnn c)
-  | Var Ident
-  | Merge Ident (CAnn c) (CAnn c)
-  | When (CAnn c) Bool Ident
-  | App Ident [CAnn c] Ident
-  deriving (Show, Eq, Functor)
-
-type ClockAnn = CAnn Clock
-
-eraseClocks :: ClockAnn -> S.Expression
-eraseClocks (C _ (Const c))     = S.Const c
-eraseClocks (C _ (Arr c e))     = S.Arr c (eraseClocks e)
-eraseClocks (C _ (BinOp o l r)) = S.BinOp o (eraseClocks l) (eraseClocks r)
-eraseClocks (C _ (Not e))       = S.Not (eraseClocks e)
-eraseClocks (C _ (Var i))       = S.Var i
-eraseClocks (C _ (Merge i l r)) = S.Merge i (eraseClocks l) (eraseClocks r)
-eraseClocks (C _ (When e c x))  = S.When  (eraseClocks e) c x
-eraseClocks (C _ (App f arg a)) = S.App f (map eraseClocks arg) a
-
 withNames :: ClockingM m => [(Ident, Clock)] -> m a -> m a
 withNames nms action = do
   env <- get
@@ -124,7 +97,7 @@ lookupName i =
 checkClock :: ClockingM m => Clock -> Clock -> m ()
 checkClock expected given = expected =?= given
 
-runClocking :: [PreNode] -> Either (Error ann) [Node ClockAnn]
+runClocking :: [PreNode] -> Either (Error ann) [Node Clock]
 runClocking ns =
   first fromClockingError .
   flip evalState mempty .
@@ -133,58 +106,54 @@ runClocking ns =
   runUnify (defaultUnifyState :: UnifyState Clock)
   $ mapM clockOfNode ns
 
-addNode :: ClockingM m => Node ClockAnn -> m ()
+addNode :: ClockingM m => Node Clock -> m ()
 addNode _ =
   pure ()
 
-clockOfNode :: ClockingM m => PreNode -> m (Node ClockAnn)
+clockOfNode :: ClockingM m => PreNode -> m (Node Clock)
 clockOfNode n@MkNode{..} = do
   varClocks <- mapM (\(n,_) -> (,) n <$> fresh) nodeVariables
   withNames varClocks $ withNames (map (fmap (const Base)) $ nodeInputs <> nodeOutputs) $ do
     eqns' <- mapM clockOfEqn nodeEquations
 
-    return ((fmap zonkMeta) <$> n { nodeEquations = eqns'})
-  where
-  zonkMeta (CMeta _)  = Base
-  zonkMeta (On c t x) = On (zonkMeta c) t x
-  zonkMeta i          = i
+    return $ n { nodeEquations = eqns'}
 
-clockOfEqn :: ClockingM m => PreEquation -> m (Equation ClockAnn)
-clockOfEqn (MkEq ids expr) = do
+clockOfEqn :: ClockingM m => PreEquation -> m (Equation Clock)
+clockOfEqn (MkEq _ ids expr) = do
   idClocks <- mapM lookupName ids
   (e', expClocks) <- clockOfExpr expr
 
   (toTuple idClocks) `checkClock` expClocks
 
-  pure (MkEq ids e')
+  pure (MkEq (toTuple idClocks) ids e')
   where toTuple [x] = x
         toTuple xss = CTuple xss
 
-clockOfExpr :: ClockingM m => S.Expression -> m (ClockAnn, Clock)
-clockOfExpr (S.Const c) = do
+clockOfExpr :: ClockingM m => Expression -> m (Expression, Clock)
+clockOfExpr (Const c) = do
   clk <- fresh
-  pure (C clk (Const c), clk)
-clockOfExpr (S.Arr c e) = do
+  pure ((Const c), clk)
+clockOfExpr (Arr c e) = do
   (e', clk) <- clockOfExpr e
 
-  pure (C clk (Arr c e'), clk)
-clockOfExpr (S.BinOp o l r) = do
+  pure ((Arr c e'), clk)
+clockOfExpr (BinOp o l r) = do
   (l', lClk) <- clockOfExpr l
   (r', rClk) <- clockOfExpr r
   lClk =?= rClk
-  pure (C lClk (BinOp o l' r'), lClk)
-clockOfExpr (S.Not e) = clockOfExpr e
-clockOfExpr (S.Var v) = do
+  pure ((BinOp o l' r'), lClk)
+clockOfExpr (Not e) = clockOfExpr e
+clockOfExpr (Var v) = do
   clk <- lookupName v
-  pure (C clk (Var v), clk)
-clockOfExpr (S.When e c x) = do
+  pure ((Var v), clk)
+clockOfExpr (When e c x) = do
   xClk <- lookupName x
 
   (e', clk) <- clockOfExpr e
   checkClock xClk clk
 
-  pure (C (On xClk c x) (When e' c x), On xClk c x)
-clockOfExpr (S.Merge x l r) = do
+  pure ((When e' c x), On xClk c x)
+clockOfExpr (Merge x l r) = do
   xClk <- lookupName x
 
   (l', lClk) <- clockOfExpr l
@@ -193,11 +162,11 @@ clockOfExpr (S.Merge x l r) = do
   (r', rClk) <- clockOfExpr r
   checkClock (On xClk False x) rClk
 
-  pure (C xClk (Merge x l' r'), xClk)
-clockOfExpr (S.App f args a) = do
+  pure ((Merge x l' r'), xClk)
+clockOfExpr (App f args a) = do
   lookupName a
   (args', clks) <- unzip <$> mapM clockOfExpr args
   ck' <- fresh
-  pure (C (CTuple clks) (App f args' a), ck')
+  pure ((App f args' a), ck')
 
 

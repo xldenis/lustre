@@ -7,12 +7,12 @@ import           Lust.Pretty
 
 import           Data.List
 
-data Node e = MkNode
+data Node ann = MkNode
   { nodeName      :: Ident
   , nodeInputs    :: [(Ident, Type)]
   , nodeOutputs   :: [(Ident, Type)]
   , nodeVariables :: [(Ident, Type)]
-  , nodeEquations :: [Equation e]
+  , nodeEquations :: [Equation ann]
   } deriving (Show, Eq, Functor)
 
 instance Pretty e => Pretty (Node e) where
@@ -36,8 +36,8 @@ instance Pretty e => Pretty (Node e) where
       (ids, tys) = unzip grps
       in hsep (punctuate comma (map pretty ids)) <+> colon <+> pretty (head tys) <> semi
 
-instance Pretty e => Pretty (Equation e) where
-  pretty (MkEq ids e) =
+instance Pretty (Equation ann) where
+  pretty (MkEq _ ids e) =
     hsep (punctuate comma (map pretty ids)) <+> pretty "=" <+> pretty e
 
 instance Pretty Type where
@@ -45,11 +45,11 @@ instance Pretty Type where
   pretty TBool  = pretty "bool"
   pretty TFloat = pretty "float"
 
-data Equation e = MkEq [Ident] e
+data Equation ann = MkEq ann [Ident] Expression
   deriving (Show, Eq, Functor)
 
-type PreNode = Node Expression
-type PreEquation = Equation Expression
+type PreNode = Node ()
+type PreEquation = Equation ()
 
 data Type
   = TInt

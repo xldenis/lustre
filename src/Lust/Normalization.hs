@@ -5,14 +5,15 @@ module Lust.Normalization where
 
 import           Control.Monad.Fresh
 import           Control.Monad.Writer
+import           Control.Monad.Reader
 
 import           Lust.Clocks
 import           Lust.Name
-import           Lust.Syntax               (Equation (..), Node (..))
+import           Lust.Syntax
 
-type NormalizeM m = (MonadFresh m, MonadWriter [Equation ClockAnn] m)
+type NormalizeM m = (MonadFresh m, MonadWriter [Equation Clock] m)
 
-runNormalize :: [Node ClockAnn] -> [Node ClockAnn]
+runNormalize :: [Node Clock] -> [Node Clock]
 runNormalize ns =
   evalFresh 0
   $ forM ns $ \n -> do
@@ -20,52 +21,53 @@ runNormalize ns =
 
     pure (n' { nodeEquations = aux ++ nodeEquations n' })
 
-emit :: NormalizeM m => ClockAnn -> m ClockAnn
+emit :: (MonadReader Clock m, NormalizeM m) => Expression -> m Expression
 emit exp = do
   nm <- prefixedName "norm_"
-  tell [MkEq [MkI nm] exp]
+  clk <- ask
+  tell [MkEq clk [MkI nm] exp]
 
-  pure (C (clockOf exp) (Var (MkI nm)))
-  where clockOf (C clk _) = clk
+  pure (Var (MkI nm))
 
-normalizeNode :: NormalizeM m => Node ClockAnn -> m (Node ClockAnn)
+normalizeNode :: NormalizeM m => Node Clock -> m (Node Clock)
 normalizeNode n@MkNode{..} = do
   eqns' <- mapM normalizeEqn nodeEquations
 
   pure (n { nodeEquations = eqns' })
 
-normalizeEqn (MkEq ids e) = do
+normalizeEqn :: NormalizeM m => Equation Clock -> m (Equation Clock)
+normalizeEqn (MkEq c ids e) = flip runReaderT c $ do
   e' <- normalizeExpr e
 
-  pure (MkEq ids e')
+  pure (MkEq c ids e')
 
-normalizeExpr :: NormalizeM m => ClockAnn -> m ClockAnn
-normalizeExpr e@(C _ (Const c)) = pure e
-normalizeExpr (C clk (Arr c e)) = do
+normalizeExpr ::(MonadReader Clock m, NormalizeM m) => Expression -> m Expression
+normalizeExpr e@(Const c) = pure e
+normalizeExpr (Arr c e) = do
   e' <- normalizeExpr e >>= emit
 
-  pure (C clk (Arr c e'))
-normalizeExpr (C clk (BinOp o l r)) = do
+  pure (Arr c e')
+normalizeExpr (BinOp o l r) = do
   l' <- normalizeExpr l
   r' <- normalizeExpr r
 
-  pure (C clk (BinOp o l' r'))
-normalizeExpr (C clk (Not e)) = do
+  pure (BinOp o l' r')
+normalizeExpr (Not e) = do
   e' <- normalizeExpr e
-  pure (C clk (Not e'))
-normalizeExpr e@(C clk (Var i)) = pure e
-normalizeExpr (C clk (Merge i l r)) = do
+  pure (Not e')
+normalizeExpr e@(Var i) = pure e
+normalizeExpr (Merge i l r) = do
   l' <- normalizeExpr l >>= emit
   r' <- normalizeExpr r >>= emit
 
-  pure (C clk (Merge i l' r'))
-normalizeExpr (C clk (When e c x))  = do
+  pure (Merge i l' r')
+normalizeExpr (When e c x)  = do
   e' <- normalizeExpr e
 
-  pure (C clk (When e' c x))
-normalizeExpr (C clk (App f args a)) = do
+  pure (When e' c x)
+normalizeExpr (App f args a) = do
   args' <- mapM normalizeExpr args
 
-  e <- emit (C clk (App f args' a))
+  e <- emit (App f args' a)
 
   pure e

@@ -121,11 +121,11 @@ typecheckNode n@MkNode{..} = do
   return n { nodeEquations = eqns' }
 
 typecheckEqn :: TypecheckM m => PreEquation -> m PreEquation
-typecheckEqn (MkEq ids expr) = do
+typecheckEqn (MkEq () ids expr) = do
   idTys <- mapM lookupWriteName ids
   (e', expTys) <- typecheckExpr expr
   if idTys == expTys
-  then pure (MkEq ids e')
+  then pure (MkEq () ids e')
   else throwError (MismatchedStream idTys expTys)
 
 

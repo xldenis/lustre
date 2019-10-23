@@ -25,7 +25,7 @@ compile = runTyping
           >=> runClocking
           >=> (pure . runNormalize)
           >=> (mapM scheduleNode)
-          >>> second (show . vcat . map (pretty . fmap eraseClocks))
+          >>> second (show . vcat . map (pretty))
 
 main :: IO ()
 main = do

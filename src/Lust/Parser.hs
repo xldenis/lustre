@@ -82,7 +82,7 @@ equation :: Parser PreEquation
 equation = do
   pats <- (pure <$> try ident) <|> parens (sepBy1 ident _Comma)
   _Equals
-  MkEq pats <$> expression
+  MkEq () pats <$> expression
 
 expression :: Parser Expression
 expression = makeExprParser primExpr
