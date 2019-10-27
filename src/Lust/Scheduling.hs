@@ -2,21 +2,20 @@
 {-# LANGUAGE RecordWildCards  #-}
 module Lust.Scheduling where
 
-
+import           Data.Bifunctor       (first)
+import           Data.Foldable
+import           Data.Graph
+import           Data.List.NonEmpty   (NonEmpty (..))
+import           Data.Maybe           (fromJust, fromMaybe)
 import           Data.Set             (Set)
 import qualified Data.Set             as Set
-import           Data.Graph
-import           Data.Hashable
-import           Data.Maybe           (fromJust, fromMaybe)
-import           Data.Foldable
-import           Data.Bifunctor       (first)
 
 import           Control.Monad.Except
 
-import           Lust.Name
-import           Lust.Syntax
 import           Lust.Error
+import           Lust.Name
 import           Lust.Pretty
+import           Lust.Syntax
 
 {- | Return the immediate dependencies of an expression
   this means anything not behind a delaying operation (fby).
@@ -31,10 +30,6 @@ left (Var i)       = Set.singleton i
 left (Merge i l r) = Set.insert i (left l <> left r)
 left (When e c x)  = Set.insert x (left e)
 left (App _ as a)  = Set.insert a (Set.unions (map left as))
-
-def :: Equation Clock -> [Ident]
-def (MkEq _ x (Arr _ _)) = []
-def (MkEq _ x a)               = x
 
 data SchedulingError
   = CausalityViolation [Ident]
@@ -54,7 +49,7 @@ fromSchedulingError (CausalityViolation ids) = Error
 
 scheduleNode :: Node Clock -> Either (Error ann) (Node Clock)
 scheduleNode n@MkNode{..} = first fromSchedulingError $ do
-  let comps = stronglyConnCompR (concatMap scheduleEq nodeEquations)
+  let comps = stronglyConnCompR (concatMap (toList . scheduleEq) nodeEquations)
   eqns' <- foldrM checkSCC [] comps
 
   pure $ n { nodeEquations = eqns' }
@@ -64,10 +59,7 @@ scheduleNode n@MkNode{..} = first fromSchedulingError $ do
   checkSCC (AcyclicSCC (v, _, _)) acc = if v `elem` acc then pure acc else pure (v : acc)
   checkSCC (CyclicSCC vs) acc = throwError . CausalityViolation $ map (\(_, i, _) -> i) vs
 
-  eqIds = nodeEquations >>= \(MkEq _ ids _) -> map (\ix -> (ix, hash ids)) ids
-
-  scheduleEq :: Equation Clock -> [(Equation Clock, Ident, [Ident])]
+  scheduleEq :: Equation Clock -> NonEmpty (Equation Clock, Ident, [Ident])
   scheduleEq e@(MkEq _ ids exp) =  let
     deps  = Set.toList (left exp)
-    -- deps' = map (\ix -> fromMaybe 0 (lookup ix eqIds)) deps
-    in map (\i -> (e, i, deps)) ids
+    in fmap (\i -> (e, i, deps)) ids

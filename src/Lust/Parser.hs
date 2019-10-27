@@ -10,17 +10,18 @@ module Lust.Parser
 import           Data.Bifunctor
 
 import           Control.Monad.Combinators.Expr
-import           Data.Text                      (Text)
-import qualified Data.Text.IO                   as T (readFile)
-import           Data.Void
+import qualified Control.Monad.Combinators.NonEmpty as NE
 import           Data.Functor
+import           Data.Text                          (Text)
+import qualified Data.Text.IO                       as T (readFile)
+import           Data.Void
 import           Text.Megaparsec
 
+import           Lust.Error
 import           Lust.Name
 import           Lust.Parser.Internal
+import           Lust.Pretty                        (pretty, viaShow)
 import           Lust.Syntax
-import           Lust.Error
-import           Lust.Pretty (pretty, viaShow)
 
 fromParseError :: ParseErrorBundle Text Void -> Error ann
 fromParseError err = Error
@@ -80,7 +81,7 @@ equations = equation `sepEndBy1` _Semi
 
 equation :: Parser PreEquation
 equation = do
-  pats <- (pure <$> try ident) <|> parens (sepBy1 ident _Comma)
+  pats <- (pure <$> try ident) <|> parens (NE.sepBy1 ident _Comma)
   _Equals
   MkEq () pats <$> expression
 
@@ -122,8 +123,7 @@ expression = makeExprParser primExpr
     f <- ident
     args <- parens (expression `sepBy1` _Comma)
     _Every
-    a <- ident
-    pure (App f args a)
+    App f args <$> ident
   merge = do
     _Merge
     x <- ident
@@ -150,15 +150,15 @@ expression = makeExprParser primExpr
 constP :: Parser Const
 constP = choice
   [ Int   <$> integer
-  , _True  $> (Bool True)
-  , _False $> (Bool False)
+  , _True  $> Bool True
+  , _False $> Bool False
   , Float <$> float
   ]
 
 typeP :: Parser Type
 typeP =
   choice
-  [ _Bool  *> pure TBool
-  , _Int   *> pure TInt
-  , _Float *> pure TFloat
+  [ _Bool Data.Functor.$> TBool
+  , _Int Data.Functor.$> TInt
+  , _Float Data.Functor.$> TFloat
   ]

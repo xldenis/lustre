@@ -1,19 +1,21 @@
 {-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE DerivingVia                #-}
 module Lust.Typing where
 
-import           Lust.Name
-import           Lust.Syntax
 import           Lust.Error
+import           Lust.Name
 import           Lust.Pretty
+import           Lust.Syntax
 
 import           Control.Monad.State
-import           Data.Bifunctor (first)
+import           Data.Bifunctor      (first)
+import           Data.List.NonEmpty  (toList)
+
 {-
 
   Annotate binary expressions with their concrete type since they can
@@ -124,9 +126,9 @@ typecheckEqn :: TypecheckM m => PreEquation -> m PreEquation
 typecheckEqn (MkEq () ids expr) = do
   idTys <- mapM lookupWriteName ids
   (e', expTys) <- typecheckExpr expr
-  if idTys == expTys
+  if toList idTys == expTys
   then pure (MkEq () ids e')
-  else throwError (MismatchedStream idTys expTys)
+  else throwError (MismatchedStream (toList idTys) expTys)
 
 
 {-| Produce the types returned by an expression. The only way to get more than one type out

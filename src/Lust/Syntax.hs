@@ -6,6 +6,8 @@ import           Lust.Name
 import           Lust.Pretty
 
 import           Data.List
+import           Data.List.NonEmpty (NonEmpty (..), toList)
+import qualified Data.List.NonEmpty as NL
 
 data Node ann = MkNode
   { nodeName      :: Ident
@@ -27,7 +29,7 @@ instance Pretty e => Pretty (Node e) where
     prettyArgList list = tupled $ map (\(i, ty) -> pretty i <+> pretty ":" <+> pretty ty) list
     prettyVars = let
       groupedVars = groupBy (\a b -> snd a == snd b) nodeVariables
-      in  if nodeVariables == []
+      in  if null nodeVariables
           then mempty
           else align $ vsep (map prettyVarGroup groupedVars)
 
@@ -38,14 +40,14 @@ instance Pretty e => Pretty (Node e) where
 
 instance Pretty (Equation ann) where
   pretty (MkEq _ ids e) =
-    hsep (punctuate comma (map pretty ids)) <+> pretty "=" <+> pretty e
+    hsep (punctuate comma (toList $ fmap pretty ids)) <+> pretty "=" <+> pretty e
 
 instance Pretty Type where
   pretty TInt   = pretty "int"
   pretty TBool  = pretty "bool"
   pretty TFloat = pretty "float"
 
-data Equation ann = MkEq ann [Ident] Expression
+data Equation ann = MkEq ann (NonEmpty Ident) Expression
   deriving (Show, Eq, Functor)
 
 type PreNode = Node ()
@@ -61,7 +63,7 @@ data Clock
   = Base
   | On Clock Bool Ident
   | CMeta Int
-  | CTuple [Clock]
+  | CTuple (NonEmpty Clock)
   deriving (Show, Eq)
 
 instance Pretty Clock where
@@ -89,8 +91,8 @@ instance Pretty Expression where
     parenthesize e@(BinOp o' _ _)
       | opPrec o > opPrec o' = parens (pretty e)
       | otherwise = pretty e
-    parenthesize e@(Const c) = pretty e
-    parenthesize e@(Var v) = pretty e
+    parenthesize e@(Const _) = pretty e
+    parenthesize e@(Var _) = pretty e
     parenthesize e = parens (pretty e)
 
   pretty (Not e) = pretty "!" <+> pretty e
@@ -123,6 +125,8 @@ opPrec Div = 3
 opPrec Mod = 3
 opPrec Add = 2
 opPrec Sub = 2
+opPrec Or  = 2
+opPrec And = 2
 opPrec Le  = 1
 opPrec Lt  = 1
 opPrec Gt  = 1

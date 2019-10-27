@@ -25,7 +25,7 @@ emit :: (MonadReader Clock m, NormalizeM m) => Expression -> m Expression
 emit exp = do
   nm <- prefixedName "norm_"
   clk <- ask
-  tell [MkEq clk [MkI nm] exp]
+  tell [MkEq clk (pure (MkI nm)) exp]
 
   pure (Var (MkI nm))
 
@@ -68,6 +68,4 @@ normalizeExpr (When e c x)  = do
 normalizeExpr (App f args a) = do
   args' <- mapM normalizeExpr args
 
-  e <- emit (App f args' a)
-
-  pure e
+  emit (App f args' a)

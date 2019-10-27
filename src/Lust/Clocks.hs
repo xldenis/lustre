@@ -1,5 +1,5 @@
 {-# LANGUAGE ConstraintKinds            #-}
-{-# LANGUAGE DeriveFunctor              #-}
+
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -12,13 +12,14 @@ import           Control.Monad.State
 import           Control.Monad.Unify
 
 import           Data.Bifunctor
-import qualified Data.HashMap.Strict  as M
+import qualified Data.HashMap.Strict as M
+import           Data.List.NonEmpty  (NonEmpty (..), toList)
+import qualified Data.List.NonEmpty  as NE
 import           Data.Maybe
-
-import           Lust.Name
-import           Lust.Syntax
 import           Lust.Error
+import           Lust.Name
 import           Lust.Pretty
+import           Lust.Syntax
 
 newtype ClockEnv = H
   { unClockEnv :: [(Ident, Clock)] }
@@ -31,12 +32,12 @@ instance Partial Clock where
 
   unknowns (CMeta i)  = [i]
   unknowns (On c _ _) = unknowns c
-  unknowns (CTuple c) = c >>= unknowns
+  unknowns (CTuple c) = toList c >>= unknowns
   unknowns _          = []
 
   ($?) sub m@(CMeta i)  = fromMaybe m $ M.lookup i (runSubstitution sub)
   ($?) sub (On clk c x) = On (sub $? clk) c x
-  ($?) sub (CTuple xs)  = CTuple (map (sub $?) xs)
+  ($?) sub (CTuple xs)  = CTuple (fmap (sub $?) xs)
   ($?) _ Base           = Base
 
 instance UnificationError Clock ClockingError where
@@ -52,7 +53,7 @@ instance MonadError ClockingError m => MonadUnify ClockingError Clock (UnifyT Cl
     then c =?= d
     else throwError $ MismatchClocks a b
   (=?=) (CTuple x) (CTuple y) =
-    mapM_ (\(x, y) -> x =?= y) (zip x y)
+    mapM_ (uncurry =?=) (NE.zip x y)
   (=?=) u t = throwError $ MismatchClocks u t
 
   getSubst = UnifyT $ gets unifyCurrentSubstitution
@@ -123,36 +124,36 @@ clockOfEqn (MkEq _ ids expr) = do
   idClocks <- mapM lookupName ids
   (e', expClocks) <- clockOfExpr expr
 
-  (toTuple idClocks) `checkClock` expClocks
+  toTuple idClocks `checkClock` expClocks
 
   pure (MkEq (toTuple idClocks) ids e')
-  where toTuple [x] = x
-        toTuple xss = CTuple xss
+  where toTuple (x :| []) = x
+        toTuple xss       = CTuple xss
 
 clockOfExpr :: ClockingM m => Expression -> m (Expression, Clock)
 clockOfExpr (Const c) = do
   clk <- fresh
-  pure ((Const c), clk)
+  pure (Const c, clk)
 clockOfExpr (Arr c e) = do
   (e', clk) <- clockOfExpr e
 
-  pure ((Arr c e'), clk)
+  pure (Arr c e', clk)
 clockOfExpr (BinOp o l r) = do
   (l', lClk) <- clockOfExpr l
   (r', rClk) <- clockOfExpr r
   lClk =?= rClk
-  pure ((BinOp o l' r'), lClk)
+  pure (BinOp o l' r', lClk)
 clockOfExpr (Not e) = clockOfExpr e
 clockOfExpr (Var v) = do
   clk <- lookupName v
-  pure ((Var v), clk)
+  pure (Var v, clk)
 clockOfExpr (When e c x) = do
   xClk <- lookupName x
 
   (e', clk) <- clockOfExpr e
   checkClock xClk clk
 
-  pure ((When e' c x), On xClk c x)
+  pure (When e' c x, On xClk c x)
 clockOfExpr (Merge x l r) = do
   xClk <- lookupName x
 
@@ -162,11 +163,11 @@ clockOfExpr (Merge x l r) = do
   (r', rClk) <- clockOfExpr r
   checkClock (On xClk False x) rClk
 
-  pure ((Merge x l' r'), xClk)
+  pure (Merge x l' r', xClk)
 clockOfExpr (App f args a) = do
   lookupName a
   (args', clks) <- unzip <$> mapM clockOfExpr args
   ck' <- fresh
-  pure ((App f args' a), ck')
+  pure (App f args' a, ck')
 
 
