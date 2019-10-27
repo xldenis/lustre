@@ -1,21 +1,21 @@
 {-# LANGUAGE RecordWildCards #-}
 module Lust.Machine where
 
-import Lust.Name
-import qualified Lust.Syntax as S
+import           Lust.Name
+import qualified Lust.Syntax         as S
 
-import Control.Monad.Fresh
+import           Control.Monad.Fresh
 type ParamList = [(Ident, MType)]
 type MemoryEnv = [(Ident, S.Const)]
 newtype MType = MkT S.Type
   deriving (Show, Eq)
 
 data ClassDef = Class
-  { className :: Ident
+  { className      :: Ident
   , classInstances :: [(Ident, Ident)] -- References to any nodes called internally!
-  , classMemory :: MemoryEnv
-  , classReset :: MachExpr
-  , classStep :: (ParamList, ParamList, MachExpr)
+  , classMemory    :: MemoryEnv
+  , classReset     :: MachExpr
+  , classStep      :: (ParamList, ParamList, MachExpr)
   } deriving (Show, Eq)
 
 data MachExpr
@@ -38,7 +38,7 @@ data MachSimpleExpr
 
 control :: S.Clock -> MachExpr -> MachExpr
 control (S.On clk c x) exp = undefined
-control  _ exp = undefined
+control  _ exp             = undefined
 
 {-
   Compile a normalized, scheduled expression
@@ -72,31 +72,31 @@ translateControlExp _ _ _ = error "translateControlExp: unnormalized expression"
 
 translateEquation :: ClassDef -> S.Equation S.Clock -> ClassDef
 translateEquation Class{..} (S.MkEq _ [x] (S.Arr c a)) = let
-mem = (x, c) : classMemory
-e'  = translateExpression mem a
-(i, o, exp) = classStep
-in Class
-   { classMemory = mem
-   , classReset = Seq (AssignState x (Val c)) classReset
-   , classStep = (i, o, joinE (Simple e') exp)
-   , ..
-   }
+  mem = (x, c) : classMemory
+  e'  = translateExpression mem a
+  (i, o, exp) = classStep
+  in Class
+     { classMemory = mem
+     , classReset = Seq (AssignState x (Val c)) classReset
+     , classStep = (i, o, joinE (Simple e') exp)
+     , ..
+     }
 translateEquation Class{..} (S.MkEq ck xs (S.App f args c)) = let
-c' = undefined
-args' = map (translateExpression classMemory) args
-instName = undefined
-(i, o, exp) = classStep
-resetNode = control ck (Case c' [(MkI "true", Reset instName), (MkI "false", Skip)])
-in Class           -- v-- call reset on f
-   { classReset = Seq (Reset instName) classReset
-   , classInstances = (instName, f) : classInstances
-   , classStep = (i, o, joinE resetNode (joinE (control ck (Step xs instName args')) exp))
-   , ..
-   }
+  c' = undefined
+  args' = map (translateExpression classMemory) args
+  instName = undefined
+  (i, o, exp) = classStep
+  resetNode = control ck (Case c' [(MkI "true", Reset instName), (MkI "false", Skip)])
+  in Class           -- v-- call reset on f
+     { classReset = Seq (Reset instName) classReset
+     , classInstances = (instName, f) : classInstances
+     , classStep = (i, o, joinE resetNode (joinE (control ck (Step xs instName args')) exp))
+     , ..
+     }
 translateEquation Class{..} (S.MkEq ck [x] e) = let
-(i, o, exp) = classStep
-in Class
-{ classStep = (i, o, joinE (control ck (translateControlExp classMemory x e)) exp)
-, ..
-}
+  (i, o, exp) = classStep
+  in Class
+  { classStep = (i, o, joinE (control ck (translateControlExp classMemory x e)) exp)
+  , ..
+  }
 
