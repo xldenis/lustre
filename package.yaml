@@ -38,7 +38,7 @@ library:
   - prettyprinter-ansi-terminal
 
   ghc-options:
-  - -Wall
+  - -W
   - -Wno-unused-do-bind
   build-tools: alex
 
