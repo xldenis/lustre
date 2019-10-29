@@ -53,7 +53,7 @@ instance MonadError ClockingError m => MonadUnify ClockingError Clock (UnifyT Cl
     then c =?= d
     else throwError $ MismatchClocks a b
   (=?=) (CTuple x) (CTuple y) =
-    mapM_ (uncurry =?=) (NE.zip x y)
+    mapM_ (uncurry (=?=)) (NE.zip x y)
   (=?=) u t = throwError $ MismatchClocks u t
 
   getSubst = UnifyT $ gets unifyCurrentSubstitution
@@ -98,7 +98,7 @@ lookupName i =
 checkClock :: ClockingM m => Clock -> Clock -> m ()
 checkClock expected given = expected =?= given
 
-runClocking :: [PreNode] -> Either (Error ann) [Node Clock]
+runClocking :: [Typed Node] -> Either (Error ann) [Clocked Node]
 runClocking ns =
   first fromClockingError .
   flip evalState mempty .
@@ -111,7 +111,7 @@ addNode :: ClockingM m => Node Clock -> m ()
 addNode _ =
   pure ()
 
-clockOfNode :: ClockingM m => PreNode -> m (Node Clock)
+clockOfNode :: ClockingM m => Typed Node -> m (Clocked Node)
 clockOfNode n@MkNode{..} = do
   varClocks <- mapM (\(n,_) -> (,) n <$> fresh) nodeVariables
   withNames varClocks $ withNames (map (fmap (const Base)) $ nodeInputs <> nodeOutputs) $ do
@@ -119,14 +119,14 @@ clockOfNode n@MkNode{..} = do
 
     return $ n { nodeEquations = eqns'}
 
-clockOfEqn :: ClockingM m => PreEquation -> m (Equation Clock)
-clockOfEqn (MkEq _ ids expr) = do
+clockOfEqn :: ClockingM m => Typed Equation -> m (Clocked Equation)
+clockOfEqn (MkEq ty ids expr) = do
   idClocks <- mapM lookupName ids
   (e', expClocks) <- clockOfExpr expr
 
   toTuple idClocks `checkClock` expClocks
 
-  pure (MkEq (toTuple idClocks) ids e')
+  pure (MkEq (ty, toTuple idClocks) ids e')
   where toTuple (x :| []) = x
         toTuple xss       = CTuple xss
 

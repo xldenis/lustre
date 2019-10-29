@@ -30,6 +30,7 @@ left (Var i)       = Set.singleton i
 left (Merge i l r) = Set.insert i (left l <> left r)
 left (When e c x)  = Set.insert x (left e)
 left (App _ as a)  = Set.insert a (Set.unions (map left as))
+left (Tuple es)    = Set.unions (fmap left es)
 
 data SchedulingError
   = CausalityViolation [Ident]
@@ -47,7 +48,7 @@ fromSchedulingError (CausalityViolation ids) = Error
     such that every operation that reads a value is evaluted after that value
 -}
 
-scheduleNode :: Node Clock -> Either (Error ann) (Node Clock)
+scheduleNode :: Eq a => Node a -> Either (Error ann) (Node a)
 scheduleNode n@MkNode{..} = first fromSchedulingError $ do
   let comps = stronglyConnCompR (concatMap (toList . scheduleEq) nodeEquations)
   eqns' <- foldrM checkSCC [] comps
@@ -59,7 +60,7 @@ scheduleNode n@MkNode{..} = first fromSchedulingError $ do
   checkSCC (AcyclicSCC (v, _, _)) acc = if v `elem` acc then pure acc else pure (v : acc)
   checkSCC (CyclicSCC vs) acc = throwError . CausalityViolation $ map (\(_, i, _) -> i) vs
 
-  scheduleEq :: Equation Clock -> NonEmpty (Equation Clock, Ident, [Ident])
+  scheduleEq :: Eq a => Equation a -> NonEmpty (Equation a, Ident, [Ident])
   scheduleEq e@(MkEq _ ids exp) =  let
     deps  = Set.toList (left exp)
     in fmap (\i -> (e, i, deps)) ids

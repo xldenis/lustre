@@ -1,10 +1,9 @@
-{-# LANGUAGE ConstraintKinds            #-}
-{-# LANGUAGE DerivingVia                #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE ConstraintKinds  #-}
+{-# LANGUAGE FlexibleContexts #-}
+
+{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE RecordWildCards  #-}
+{-# LANGUAGE TupleSections    #-}
 module Lust.Typing where
 
 import           Lust.Error
@@ -14,7 +13,7 @@ import           Lust.Syntax
 
 import           Control.Monad.State
 import           Data.Bifunctor      (first)
-import           Data.List.NonEmpty  (toList)
+import           Data.List.NonEmpty  (NonEmpty (..), nonEmpty, toList)
 
 {-
 
@@ -28,7 +27,7 @@ data VarRole = Write | Read
 
 data Environment = MkE
   { gamma :: [(Ident, (VarRole, Type))]
-  , delta :: [(Ident, ([Type], [Type]))]
+  , delta :: [(Ident, (Maybe Type, Type))]
   } deriving (Show, Eq)
 
 instance Semigroup Environment where
@@ -41,9 +40,10 @@ data TypecheckError
   = TypeMismatch Type Type -- ^ expected type t but got type u
   | IncorrectArity [Type] [Type] -- ^ Expected a stream of type (t1, .., tn) but got a stream of type (s1, ..., sm)
   | UndefinedIdent Ident
-  | MismatchedStream [Type] [Type]
+  | MismatchedStream (NonEmpty Type) (NonEmpty Type)
   | BadBinOpStream BinOpTy [Type]
   | WriteToInput Ident
+  | EmptyReturnType
   deriving (Show, Eq)
 
 fromTypeError :: TypecheckError -> Error ann
@@ -65,14 +65,15 @@ fromTypeError err = Error
     pretty "Undefined variable" <+> pretty i
   render (MismatchedStream es gs) =
     pretty "Expected a stream of type"
-    <+> tupled (map pretty es) <+> pretty "len" <+> pretty (length es)
+    <+> tupled (toList $ fmap pretty es) <+> pretty "len" <+> pretty (length es)
     <+> pretty "but got"
-    <+> tupled (map pretty gs) <+> pretty "len" <+> pretty (length es)
+    <+> tupled (toList $ fmap pretty gs) <+> pretty "len" <+> pretty (length es)
   render (BadBinOpStream _ tys) =
     pretty "Binary operations can't be applied to streams of type" <+> tupled (map pretty tys)
+
 type TypecheckM m = (MonadState Environment m, MonadError TypecheckError m)
 
-runTyping :: [PreNode] -> Either Error' [PreNode]
+runTyping :: [PreNode] -> Either Error' [Typed Node]
 runTyping n =
     first fromTypeError
   . flip evalState mempty
@@ -100,21 +101,27 @@ lookupWriteName i =
   Just (_, _) -> throwError $ WriteToInput i
   Nothing -> throwError $ UndefinedIdent i
 
-lookupFunction :: TypecheckM m => Ident -> m ([Type], [Type])
+lookupFunction :: TypecheckM m => Ident -> m (Maybe Type, Type)
 lookupFunction i =
   gets (lookup i . delta) >>= \case
   Just x -> pure x
   Nothing -> throwError $ UndefinedIdent i
 
 addNode :: TypecheckM m => PreNode -> m ()
-addNode (MkNode{..}) = do
-  let pair = (nodeName, (map snd nodeInputs, map snd nodeOutputs))
-  modify $ \s -> MkE mempty [pair] <> s
+addNode MkNode{..} = do
+  outputs <- case nonEmpty (map snd nodeOutputs) of
+    Just x  -> pure (TTuple x)
+    Nothing -> throwError EmptyReturnType
+  let inps = TTuple <$> nonEmpty (map snd nodeInputs)
+  let pair = (nodeName, (inps, outputs))
 
-typecheckNodes :: TypecheckM m => [PreNode] -> m [PreNode]
+  modify $ \s -> MkE mempty [pair] <> s
+  where
+
+typecheckNodes :: TypecheckM m => [PreNode] -> m [Typed Node]
 typecheckNodes = mapM (\n -> typecheckNode n <* addNode n)
 
-typecheckNode :: TypecheckM m => PreNode -> m PreNode
+typecheckNode :: TypecheckM m => PreNode -> m (Typed Node)
 typecheckNode n@MkNode{..} = do
   eqns' <- withNames (map (fmap (Read,)) nodeInputs) $
     withNames (map (fmap (Write,)) (nodeOutputs <> nodeVariables)) $
@@ -122,27 +129,28 @@ typecheckNode n@MkNode{..} = do
 
   return n { nodeEquations = eqns' }
 
-typecheckEqn :: TypecheckM m => PreEquation -> m PreEquation
+typecheckEqn :: TypecheckM m => PreEquation -> m (Typed Equation)
 typecheckEqn (MkEq () ids expr) = do
   idTys <- mapM lookupWriteName ids
   (e', expTys) <- typecheckExpr expr
-  if toList idTys == expTys
-  then pure (MkEq () ids e')
-  else throwError (MismatchedStream (toList idTys) expTys)
-
+  if idTys == fromTTuple expTys
+  then pure (MkEq expTys ids e')
+  else throwError (MismatchedStream idTys (fromTTuple expTys))
+  where
+  fromTTuple (TTuple xs) = xs
+  fromTTuple ty          = ty :| []
 
 {-| Produce the types returned by an expression. The only way to get more than one type out
     is when an application returns more than one output
 -}
 
-checkType :: TypecheckM m => Type -> [Type] -> m ()
+checkType :: TypecheckM m => Type -> Type -> m ()
 checkType expected given = case given of
-  [t] |  t == expected -> pure ()
-      | otherwise -> throwError (TypeMismatch expected t)
-  tys  -> throwError (IncorrectArity [expected] tys)
+  t |  t == expected -> pure ()
+    |  otherwise -> throwError (TypeMismatch expected t)
 
-typecheckExpr :: TypecheckM m => Expression -> m (Expression, [Type])
-typecheckExpr (Const c) = pure (Const c, [constTy c])
+typecheckExpr :: TypecheckM m => Expression -> m (Expression, Type)
+typecheckExpr (Const c) = pure (Const c, constTy c)
 typecheckExpr (Arr c expr) = do
   (e', ety) <- typecheckExpr expr
   checkType (constTy c) ety
@@ -152,28 +160,28 @@ typecheckExpr (Not e) = do
   (e', ety) <- typecheckExpr e
   checkType TBool ety
   pure (Not e', ety)
-typecheckExpr (Var i) = (Var i,) . pure <$> lookupName i
+typecheckExpr (Var i) = (Var i,) <$> lookupName i
 typecheckExpr (BinOp op l r) = do
   (l', lty) <- typecheckExpr l
   (r', rty) <- typecheckExpr r
   case (binOpTy op, lty, rty) of
-    (Pred,  [t1], t2) -> checkType t1 t2 >> pure (BinOp op l' r', [TBool])
-    (Arith, [t1], t2) -> checkType t1 t2 >> pure (BinOp op l' r', lty)
+    (opty, TTuple t1, _) -> throwError (BadBinOpStream opty (toList t1))
+    (Pred,  t1, t2) -> checkType t1 t2 >> pure (BinOp op l' r', TBool)
+    (Arith, t1, t2) -> checkType t1 t2 >> pure (BinOp op l' r', lty)
     (Logical, t1, t2) ->
       checkType TBool t1 >>
       checkType TBool t2 >>
-      pure (BinOp op l' r', [TBool])
-    (opty, t1, _) -> throwError (BadBinOpStream opty t1)
+      pure (BinOp op l' r', TBool)
 typecheckExpr (Merge c l r) = do
-  lookupName c >>= checkType TBool . pure
+  lookupName c >>= checkType TBool
   (l', ltys) <- typecheckExpr l
   (r', rtys) <- typecheckExpr r
 
   if ltys == rtys
   then pure (Merge c l' r', ltys)
-  else throwError (MismatchedStream ltys rtys)
+  else throwError (TypeMismatch ltys rtys)
 typecheckExpr (When e c x) = do
-  lookupName x >>= checkType TBool . pure
+  lookupName x >>= checkType TBool
 
   (e', ety) <- typecheckExpr e
 
@@ -181,20 +189,23 @@ typecheckExpr (When e c x) = do
 typecheckExpr (App f args a) = do
   (atys, rettys) <- lookupFunction f
   (args', argtys) <- unzip <$> mapM typecheckExpr args
-
-  go atys (concat argtys)
+  let argTuple = fmap TTuple (nonEmpty argtys)
+  when (atys /= argTuple) (throwError (IncorrectArity (argsToList atys) argtys))
 
   pure (App f args' a, rettys)
   where
-  go (g : gs) (e : es) = if g == e then go gs es else throwError (TypeMismatch g e)
-  go [] [] = pure ()
-  go _  _  = throwError undefined
+  argsToList Nothing           = []
+  argsToList (Just (TTuple x)) = toList x
+  argsToList (Just x)          = [x]
 
 data BinOpTy
   = Pred
   | Arith
   | Logical
   deriving (Show, Eq)
+
+tupleTy (x :| []) = x
+tupleTy xs        = TTuple xs
 
 binOpTy :: Op -> BinOpTy
 binOpTy Eq  = Pred
@@ -210,8 +221,3 @@ binOpTy Div = Arith
 binOpTy Mod = Arith
 binOpTy And = Logical
 binOpTy Or  = Logical
-
-constTy :: Const -> Type
-constTy (Bool _)  = TBool
-constTy (Int _)   = TInt
-constTy (Float _) = TFloat

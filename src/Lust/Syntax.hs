@@ -17,6 +17,8 @@ data Node ann = MkNode
   , nodeEquations :: [Equation ann]
   } deriving (Show, Eq, Functor)
 
+prettyArgList list = tupled $ map (\(i, ty) -> pretty i <+> pretty ":" <+> pretty ty) list
+
 instance Pretty e => Pretty (Node e) where
   pretty MkNode{..} =
     pretty "node" <+> pretty nodeName <+> prettyArgList nodeInputs
@@ -26,7 +28,6 @@ instance Pretty e => Pretty (Node e) where
     `above` indent 2 (vsep (map (\x -> pretty x <> semi) nodeEquations))
     `above` pretty "end"
     where
-    prettyArgList list = tupled $ map (\(i, ty) -> pretty i <+> pretty ":" <+> pretty ty) list
     prettyVars = let
       groupedVars = groupBy (\a b -> snd a == snd b) nodeVariables
       in  if null nodeVariables
@@ -52,11 +53,14 @@ data Equation ann = MkEq ann (NonEmpty Ident) Expression
 
 type PreNode = Node ()
 type PreEquation = Equation ()
+type Typed f = f Type
+type Clocked f = f (Type, Clock)
 
 data Type
   = TInt
   | TBool
   | TFloat
+  | TTuple (NonEmpty Type)
   deriving (Show, Eq)
 
 data Clock
@@ -81,6 +85,7 @@ data Expression
   | Merge Ident Expression Expression
   | When Expression Bool Ident
   | App Ident [Expression] Ident
+  | Tuple (NonEmpty Expression)
   deriving (Show, Eq)
 
 instance Pretty Expression where
@@ -105,6 +110,7 @@ instance Pretty Expression where
     where pBool True  = pretty "true"
           pBool False = pretty "false"
   pretty (App f args a) = pretty f <> tupled (map pretty args) <+> pretty "every" <+> pretty a
+  pretty (Tuple es) = tupled (toList $ fmap pretty es)
 instance Pretty Ident where
   pretty (MkI i) = pretty i
 
@@ -154,3 +160,8 @@ data Const
   | Bool Bool
   | Float Float
   deriving (Show, Eq)
+
+constTy :: Const -> Type
+constTy (Bool _)  = TBool
+constTy (Int _)   = TInt
+constTy (Float _) = TFloat

@@ -7,13 +7,16 @@ import           Control.Monad.Fresh
 import           Control.Monad.Writer
 import           Control.Monad.Reader
 
+import           Data.List.NonEmpty (NonEmpty(..), nonEmpty, toList, fromList)
+
 import           Lust.Clocks
 import           Lust.Name
 import           Lust.Syntax
 
-type NormalizeM m = (MonadFresh m, MonadWriter [Equation Clock] m)
 
-runNormalize :: [Node Clock] -> [Node Clock]
+type NormalizeM m = (MonadFresh m, MonadWriter [Clocked Equation] m)
+
+runNormalize :: [Clocked Node] -> [Clocked Node]
 runNormalize ns =
   evalFresh 0
   $ forM ns $ \n -> do
@@ -21,27 +24,31 @@ runNormalize ns =
 
     pure (n' { nodeEquations = aux ++ nodeEquations n' })
 
-emit :: (MonadReader Clock m, NormalizeM m) => Expression -> m Expression
+emit :: (MonadReader (Type, Clock) m, NormalizeM m) => Expression -> m Expression
 emit exp = do
-  nm <- prefixedName "norm_"
-  clk <- ask
-  tell [MkEq clk (pure (MkI nm)) exp]
+  ann <- ask
+  nm <- MkI <$> prefixedName "norm_"
+  tell [MkEq ann (pure nm) exp]
 
-  pure (Var (MkI nm))
+  pure (Var nm)
 
-normalizeNode :: NormalizeM m => Node Clock -> m (Node Clock)
+normalizeNode :: NormalizeM m => Clocked Node -> m (Clocked Node)
 normalizeNode n@MkNode{..} = do
   eqns' <- mapM normalizeEqn nodeEquations
 
   pure (n { nodeEquations = eqns' })
 
-normalizeEqn :: NormalizeM m => Equation Clock -> m (Equation Clock)
+normalizeEqn :: NormalizeM m => Clocked Equation -> m (Clocked Equation)
+normalizeEqn (MkEq c ids (App f args a)) = flip runReaderT c $ do
+  args' <- mapM normalizeExpr args
+
+  pure (MkEq c ids (App f args' a))
 normalizeEqn (MkEq c ids e) = flip runReaderT c $ do
   e' <- normalizeExpr e
 
   pure (MkEq c ids e')
 
-normalizeExpr ::(MonadReader Clock m, NormalizeM m) => Expression -> m Expression
+normalizeExpr :: (MonadReader (Type, Clock) m, NormalizeM m) => Expression -> m Expression
 normalizeExpr e@(Const c) = pure e
 normalizeExpr (Arr c e) = do
   e' <- normalizeExpr e >>= emit
