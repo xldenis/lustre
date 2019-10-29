@@ -7,7 +7,7 @@ fail() {
 }
 
 l0_style() {
-    stack exec -- stylish-haskell -i "$@"
+    stack exec -- brittany --write-mode=inplace --columns=100 --import-col=45 --import-as-col=45 "$@"
     git add "$@"
 }
 
