@@ -14,8 +14,7 @@ import           Data.List.NonEmpty        ( toList
 type OutList = [(Ident, ParamList)]
 
 generateC :: [MachDef] -> [Doc ann]
-generateC ms = map (generateN outMap) ms
-  where outMap = map (\m -> let (_, o, _) = machStep m in (machName m, o)) ms
+generateC ms = map (generateN outMap) ms where outMap = map (\m -> (machName m, machOuts m)) ms
 
 generateN :: OutList -> MachDef -> Doc ann
 generateN p m = vcat [machineStruct m, machineReset p m, machineStep p m]
@@ -41,35 +40,26 @@ machineStruct Machine {..} = machStruct `above` outputStruct
       <+> pretty machName
       <>  semi
 
-  outputStruct =
-    let (_, o, _) = machStep
-    in
-      case o of
-        []  -> mempty
-        [_] -> mempty
-        xs ->
-          pretty "typedef"
-            <+> pretty "struct"
-            <+> (hang 2 . braces' . vcat . punctuate semi $ map
-                  (\(id, ty) -> cTy ty <+> pretty id)
-                  xs
-                )
-            <+> pretty (unId machName <> "_out")
-            <>  semi
+  outputStruct = case machOuts of
+    []  -> pretty "typedef" <+> pretty "void" <+> machOutputStruct machName <> semi
+    [x] -> pretty "typedef" <+> cTy (snd x) <+> machOutputStruct machName <> semi
+    xs ->
+      pretty "typedef"
+        <+> pretty "struct"
+        <+> (hang 2 . braces' . vcat . punctuate semi $ map (\(id, ty) -> cTy ty <+> pretty id) xs)
+        <+> pretty (unId machName <> "_out")
+        <>  semi
 
 
+cTy :: Type -> Doc a
 cTy TBool      = pretty "bool"
 cTy TInt       = pretty "int"
 cTy TFloat     = pretty "float"
 cTy (TTuple _) = error "omg"
 
-machOutputStruct Machine {..} =
-  pointer
-    $ let (_, o, _) = machStep
-      in  case o of
-            []       -> pretty "void"
-            [(_, x)] -> cTy x
-            _        -> pretty (unId machName <> "_out")
+
+machOutputStruct :: Ident -> Doc a
+machOutputStruct i = pretty (unId i <> "_out")
 
 stateI i = pretty "self" <> pretty "->" <> pretty i
 
@@ -90,13 +80,16 @@ machineReset ol m@Machine {..} =
 -- | Generate the code corresponding to the step method of a machine
 machineStep :: OutList -> MachDef -> Doc a
 machineStep ol m@Machine {..} =
-  let (inps, _, exp) = machStep
-  in  pretty "void" <+> pretty (unId machName <> "_step") <+> tupled (machInps inps) <+> braces'
-        (nest 2 $ hardline <> cExpr ol machInstances exp)
+  pretty "void" <+> pretty (unId machName <> "_step") <+> tupled (stepArgs machInps) <+> braces'
+    (nest 2 $ hardline <> vsep (localDecls <> instDecls <> [cExpr ol machInstances machStep]))
  where
-  machInps i =
+  localDecls = map (\(i, ty) -> cTy ty <+> pretty i <> semi) machLocals
+  instDecls =
+    map (\(i, ty) -> machOutputStruct ty <+> pretty (i <> MkI "$out") <> semi) machInstances
+
+  stepArgs i =
     (machPointerTy m <+> pretty "self")
-      : (machOutputStruct m <+> pretty "out")
+      : (pointer (machOutputStruct machName) <+> pretty "out")
       : map (\(id, ty) -> cTy ty <+> pretty id) i
 
 cName (LocalN i) = pretty i
@@ -106,35 +99,35 @@ cName (OutN   i) = pretty "out" <> pretty "->" <> pretty i
 assignment n e = cName n <+> equals <+> e
 
 -- | Transform an expression into C code
-cExpr :: OutList -> [(Ident, Ident)] -> MachExpr -> Doc a
+cExpr :: OutList -> [(Ident, Ident)] -> MachExpr MachLExp -> Doc a
 cExpr _  _     Skip = mempty
 cExpr ol insts e    = go ol insts e <> semi
  where
   go ol insts (Seq s1 s2)  = go ol insts s1 <> semi `above` go ol insts s2
   go _  _     Skip         = mempty
   go _  _     (Assign i s) = assignment i (cSimpExpr s)
-  go _  _     (Reset i   ) = pretty "reset" <> parens (stateI i)
-  go ol insts (Case x brs) = pretty "switch" <+> cSimpExpr x <+> braces' (vcat $ map printBrs brs)
+  go _  insts (Reset i   ) = pretty (unId ty <> "_reset") <> parens (stateI i)
+    where Just ty = lookup i insts
+  go ol insts (Case x brs) = pretty "switch" <+> parens (cSimpExpr x) <+> braces'
+    (vcat $ map printBrs brs)
    where
     printBrs (_, Skip) = mempty
     printBrs (i, br  ) = pretty "case" <+> pretty i <> colon <+> braces' (cExpr ol insts br)
   go ol insts (Step res o f args) =
-    vcat
-      . punctuate semi
-      $ assignment (LocalN (o <> MkI "$out")) (pretty (unId ty <> "_step") <> tupled stepArgs)
-      : assignRes res
+    vcat . punctuate semi $ (pretty (unId ty <> "_step") <> tupled stepArgs) : assignRes res
    where
-    Just pl  = f `lookup` ol
-    stepArgs = cName (StateN o) : map cSimpExpr args
+    Just pl = f `lookup` ol
+    stepArgs =
+      cName (StateN o) : pretty "&" <+> cName (LocalN (o <> MkI "$out")) : map cSimpExpr args
 
     assignRes (i :| []) = [assignment (LocalN i) (pretty (unId o <> "$out"))]
     assignRes xs = map (\(i, (a, _)) -> assignment (LocalN i) (outAccessor a)) (zip (toList xs) pl)
 
-    outAccessor field = pretty (unId o <> "$out") <> pretty "->" <> pretty field
+    outAccessor field = pretty (unId o <> "$out") <> dot <> pretty field
     Just ty = lookup o insts
   go _ _ (Simple s) = cSimpExpr s
 
-cSimpExpr :: MachSimpleExpr -> Doc ann
+cSimpExpr :: MachSimpleExpr MachLExp -> Doc ann
 cSimpExpr (M.Var x) = cName x
 cSimpExpr (Val   c) = pretty c
 cSimpExpr e         = pretty e
