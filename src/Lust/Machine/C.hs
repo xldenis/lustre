@@ -28,8 +28,7 @@ machineStruct Machine {..} = machStruct `above` outputStruct
   instanceType (id, ty) = pointer (pretty ty) <+> pretty id
 
   machStruct =
-    pretty "typedef"
-      <+> pretty "struct"
+    (pretty "typedef" <+> pretty "struct")
       <+> (  hang 2
           .  braces'
           .  vcat
@@ -44,12 +43,10 @@ machineStruct Machine {..} = machStruct `above` outputStruct
     []  -> pretty "typedef" <+> pretty "void" <+> machOutputStruct machName <> semi
     [x] -> pretty "typedef" <+> cTy (snd x) <+> machOutputStruct machName <> semi
     xs ->
-      pretty "typedef"
-        <+> pretty "struct"
+      (pretty "typedef" <+> pretty "struct")
         <+> (hang 2 . braces' . vcat . punctuate semi $ map (\(id, ty) -> cTy ty <+> pretty id) xs)
         <+> pretty (unId machName <> "_out")
         <>  semi
-
 
 cTy :: Type -> Doc a
 cTy TBool      = pretty "bool"
@@ -57,12 +54,13 @@ cTy TInt       = pretty "int"
 cTy TFloat     = pretty "float"
 cTy (TTuple _) = error "omg"
 
-
 machOutputStruct :: Ident -> Doc a
 machOutputStruct i = pretty (unId i <> "_out")
 
+stateI :: Ident -> Doc a
 stateI i = pretty "self" <> pretty "->" <> pretty i
 
+pointer :: Doc a -> Doc a
 pointer d = d <> pretty "*"
 
 -- | Get the type of the machine state struct
@@ -92,10 +90,12 @@ machineStep ol m@Machine {..} =
       : (pointer (machOutputStruct machName) <+> pretty "out")
       : map (\(id, ty) -> cTy ty <+> pretty id) i
 
+cName :: MachLExp -> Doc a
 cName (LocalN i) = pretty i
 cName (StateN i) = stateI i
 cName (OutN   i) = pretty "out" <> pretty "->" <> pretty i
 
+assignment :: MachLExp -> Doc a -> Doc a
 assignment n e = cName n <+> equals <+> e
 
 -- | Transform an expression into C code

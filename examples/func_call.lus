@@ -9,7 +9,7 @@ var t : bool;
     e : bool;
     clk : bool;
 let
-  clk = true;
+  clk = false -> true;
   (t, e) = omg(x) every clk;
 
 end

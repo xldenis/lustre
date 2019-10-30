@@ -31,7 +31,7 @@ compile =
     >=> (pure . map nodeToObc)
     >=> (pure . generateC)
     >>> second (show . vcat)
-          -- >>> second (show . vcat . map pretty)
+    -- >>> second (show . vcat . map pretty)
 
 main :: IO ()
 main = do

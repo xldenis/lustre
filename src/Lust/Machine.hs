@@ -116,7 +116,8 @@ nodeToObc S.MkNode {..} = evalFresh 0 $ foldrM
   (Machine nodeName [] [] Skip Skip nodeInputs nodeOutputs [])
   nodeEquations
 
--- create the control structures for an expression on a clock
+-- | Create the control structures for an expression on a clock, joinE will then attempt to fuse these structures
+
 control :: S.Clock -> MachExpr MachLExp -> MachExpr MachLExp
 control (S.On clk c x) exp = Case (Var (LocalN x))
                                   [(toPat c, control clk exp), (toPat (not c), Skip)]
@@ -140,24 +141,27 @@ joinE e1 e2          = seq' e1 e2
 
 type NameMap = [(Ident, MachLExp)]
 
+-- | Indicate where each variable is from, either output, state variable or local
+-- | If a variable isn't present it means it's a local
 nameMap :: ParamList -> MemoryEnv -> NameMap
 nameMap outs mem =
   map (\x -> (fst x, OutN $ fst x)) outs <> map (\x -> (fst x, StateN $ fst x)) mem
 
+lookupNameMap :: Ident -> NameMap -> MachLExp
+lookupNameMap x nm = fromMaybe (LocalN x) (lookup x nm)
+
 -- | This function is partial because it only compiles normalized expressions
 translateExpression :: NameMap -> S.Expression -> MachSimpleExpr MachLExp
 translateExpression _ (S.Const c     ) = Val c
-translateExpression m (S.Var   x     ) = Var $ fromMaybe (LocalN x) (lookup x m)
+translateExpression m (S.Var   x     ) = Var $ lookupNameMap x m
 translateExpression m (S.When  e  _ _) = translateExpression m e
 translateExpression m (S.BinOp op l r) = Call op [translateExpression m l, translateExpression m r]
 
 translateControlExp :: NameMap -> Ident -> S.Expression -> MachExpr MachLExp
-translateControlExp m y (S.Merge x l r) =
-  let x' = fromMaybe (LocalN x) (lookup x m)
-  in  Case (Var x')
-           [(MkI "true", translateControlExp m y l), (MkI "false", translateControlExp m y r)]
-translateControlExp m y a =
-  let y' = fromMaybe (LocalN y) (lookup y m) in Assign y' (translateExpression m a)
+translateControlExp m y (S.Merge x l r) = Case
+  (Var $ lookupNameMap x m)
+  [(MkI "true", translateControlExp m y l), (MkI "false", translateControlExp m y r)]
+translateControlExp m y a = Assign (lookupNameMap y m) (translateExpression m a)
 
 translateEquation :: MonadFresh m => MachDef -> S.Clocked S.Equation -> m MachDef
 translateEquation Machine {..} (S.MkEq (_, ck) (x :| []) (S.Arr c a)) = do
@@ -171,7 +175,7 @@ translateEquation Machine {..} (S.MkEq (_, ck) (x :| []) (S.Arr c a)) = do
     }
 translateEquation Machine {..} (S.MkEq (ty, ck) xs (S.App f args c)) = do
   instName <- MkI <$> prefixedName "machine"
-  let c'        = fromMaybe (LocalN c) (lookup c names)
+  let c'        = lookupNameMap c names
       names     = nameMap machOuts machMemory
       args'     = map (translateExpression names) args
       locals'   = toParamList ty xs \\ machOuts
