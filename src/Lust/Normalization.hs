@@ -7,9 +7,13 @@ import           Control.Monad.Fresh
 import           Control.Monad.Writer
 import           Control.Monad.Reader
 
-import           Data.List.NonEmpty (NonEmpty(..), nonEmpty, toList, fromList)
+import           Data.List.NonEmpty        ( NonEmpty(..)
+                                           , nonEmpty
+                                           , toList
+                                           , fromList
+                                           )
 
-import           Lust.Clocks
+import           Lust.Typing.Clocks
 import           Lust.Name
 import           Lust.Syntax
 
@@ -17,23 +21,21 @@ import           Lust.Syntax
 type NormalizeM m = (MonadFresh m, MonadWriter [Clocked Equation] m)
 
 runNormalize :: [Clocked Node] -> [Clocked Node]
-runNormalize ns =
-  evalFresh 0
-  $ forM ns $ \n -> do
-    (n', aux) <- runWriterT $ normalizeNode n
+runNormalize ns = evalFresh 0 $ forM ns $ \n -> do
+  (n', aux) <- runWriterT $ normalizeNode n
 
-    pure (n' { nodeEquations = aux ++ nodeEquations n' })
+  pure (n' { nodeEquations = aux ++ nodeEquations n' })
 
 emit :: (MonadReader (Type, Clock) m, NormalizeM m) => Expression -> m Expression
 emit exp = do
   ann <- ask
-  nm <- MkI <$> prefixedName "norm_"
+  nm  <- MkI <$> prefixedName "norm_"
   tell [MkEq ann (pure nm) exp]
 
   pure (Var nm)
 
 normalizeNode :: NormalizeM m => Clocked Node -> m (Clocked Node)
-normalizeNode n@MkNode{..} = do
+normalizeNode n@MkNode {..} = do
   eqns' <- mapM normalizeEqn nodeEquations
 
   pure (n { nodeEquations = eqns' })
@@ -50,7 +52,7 @@ normalizeEqn (MkEq c ids e) = flip runReaderT c $ do
 
 normalizeExpr :: (MonadReader (Type, Clock) m, NormalizeM m) => Expression -> m Expression
 normalizeExpr e@(Const c) = pure e
-normalizeExpr (Arr c e) = do
+normalizeExpr (  Arr c e) = do
   e' <- normalizeExpr e >>= emit
 
   pure (Arr c e')
@@ -62,13 +64,13 @@ normalizeExpr (BinOp o l r) = do
 normalizeExpr (Not e) = do
   e' <- normalizeExpr e
   pure (Not e')
-normalizeExpr e@(Var i) = pure e
-normalizeExpr (Merge i l r) = do
+normalizeExpr e@(Var i      ) = pure e
+normalizeExpr (  Merge i l r) = do
   l' <- normalizeExpr l >>= emit
   r' <- normalizeExpr r >>= emit
 
   pure (Merge i l' r')
-normalizeExpr (When e c x)  = do
+normalizeExpr (When e c x) = do
   e' <- normalizeExpr e
 
   pure (When e' c x)

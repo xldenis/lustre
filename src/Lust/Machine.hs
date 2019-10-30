@@ -109,6 +109,8 @@ instance Pretty v => Pretty (MachSimpleExpr v) where
   Maybe I should still wrap this in an error monad to catch the 'impossible'
   cases (if it's ever run on unnormalized expressions)
 -}
+runCompileToObc :: [S.Clocked S.Node] -> [MachDef]
+runCompileToObc = map nodeToObc
 
 nodeToObc :: S.Clocked S.Node -> MachDef
 nodeToObc S.MkNode {..} = evalFresh 0 $ foldrM

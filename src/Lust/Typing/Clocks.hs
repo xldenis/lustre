@@ -1,21 +1,23 @@
 {-# LANGUAGE ConstraintKinds            #-}
-
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE RecordWildCards            #-}
-module Lust.Clocks where
+module Lust.Typing.Clocks where
 
 import           Control.Monad.State
 import           Control.Monad.Unify
 
 import           Data.Bifunctor
-import qualified Data.HashMap.Strict as M
-import           Data.List.NonEmpty  (NonEmpty (..), toList)
-import qualified Data.List.NonEmpty  as NE
+import qualified Data.HashMap.Strict      as M
+import           Data.List.NonEmpty        ( NonEmpty(..)
+                                           , toList
+                                           )
+import qualified Data.List.NonEmpty       as NE
 import           Data.Maybe
+
 import           Lust.Error
 import           Lust.Name
 import           Lust.Pretty
@@ -30,36 +32,34 @@ instance Partial Clock where
   isUnknown (CMeta i) = Just i
   isUnknown _         = Nothing
 
-  unknowns (CMeta i)  = [i]
+  unknowns (CMeta i ) = [i]
   unknowns (On c _ _) = unknowns c
   unknowns (CTuple c) = toList c >>= unknowns
   unknowns _          = []
 
-  ($?) sub m@(CMeta i)  = fromMaybe m $ M.lookup i (runSubstitution sub)
-  ($?) sub (On clk c x) = On (sub $? clk) c x
-  ($?) sub (CTuple xs)  = CTuple (fmap (sub $?) xs)
-  ($?) _ Base           = Base
+  ($?) sub m@(CMeta i   ) = fromMaybe m $ M.lookup i (runSubstitution sub)
+  ($?) sub (  On clk c x) = On (sub $? clk) c x
+  ($?) sub (  CTuple xs ) = CTuple (fmap (sub $?) xs)
+  ($?) _   Base           = Base
 
 instance UnificationError Clock ClockingError where
   occursCheckFailed = ClockOccursCheck
 
 instance MonadError ClockingError m => MonadUnify ClockingError Clock (UnifyT Clock m) where
   (=?=) (CMeta i) (CMeta v) | i == v = return ()
-  (=?=) (CMeta i) u = i =:= u
-  (=?=) i (CMeta u) = u =:= i
-  (=?=) Base Base = return ()
+  (=?=) (CMeta i) u                  = i =:= u
+  (=?=) i         (CMeta u)          = u =:= i
+  (=?=) Base      Base               = return ()
   (=?=) a@(On c s x) b@(On d t y) =
-    if s == t && x == y
-    then c =?= d
-    else throwError $ MismatchClocks a b
-  (=?=) (CTuple x) (CTuple y) =
-    mapM_ (uncurry (=?=)) (NE.zip x y)
-  (=?=) u t = throwError $ MismatchClocks u t
+    if s == t && x == y then c =?= d else throwError $ MismatchClocks a b
+  (=?=) (CTuple x) (CTuple y) = mapM_ (uncurry (=?=)) (NE.zip x y)
+  (=?=) u          t          = throwError $ MismatchClocks u t
 
   getSubst = UnifyT $ gets unifyCurrentSubstitution
   setSubst sub = UnifyT $ modify $ \s -> s { unifyCurrentSubstitution = sub }
 
-type ClockingM m = (MonadState ClockEnv m, MonadError ClockingError m, MonadUnify ClockingError Clock m)
+type ClockingM m
+  = (MonadState ClockEnv m, MonadError ClockingError m, MonadUnify ClockingError Clock m)
 
 data ClockingError
   = MismatchClocks Clock Clock
@@ -69,12 +69,11 @@ data ClockingError
   | ClockOccursCheck Clock
   deriving (Show, Eq)
 
-fromClockingError err = Error
-  { errHeader   = pretty "Clocking Error"
-  , errKind     = "clocking"
-  , errSummary  = render err
-  }
-  where
+fromClockingError err = Error { errHeader  = pretty "Clocking Error"
+                              , errKind    = "clocking"
+                              , errSummary = render err
+                              }
+ where
 
   render (MismatchClocks ck1 ck2) =
     pretty "Could not unify clock" <+> pretty ck1 <+> pretty "with" <+> pretty ck2
@@ -90,8 +89,7 @@ withNames nms action = do
   return res
 
 lookupName :: ClockingM m => Ident -> m Clock
-lookupName i =
-  gets (lookup i . unClockEnv) >>= \case
+lookupName i = gets (lookup i . unClockEnv) >>= \case
   Just t  -> pure t
   Nothing -> throwError $ UndefinedIdentClk i
 
@@ -100,35 +98,35 @@ checkClock expected given = expected =?= given
 
 runClocking :: [Typed Node] -> Either (Error ann) [Clocked Node]
 runClocking ns =
-  first fromClockingError .
-  flip evalState mempty .
-  runExceptT .
-  fmap fst .
-  runUnify (defaultUnifyState :: UnifyState Clock)
-  $ mapM clockOfNode ns
+  first fromClockingError
+    . flip evalState mempty
+    . runExceptT
+    . fmap fst
+    . runUnify (defaultUnifyState :: UnifyState Clock)
+    $ mapM clockOfNode ns
 
 addNode :: ClockingM m => Node Clock -> m ()
-addNode _ =
-  pure ()
+addNode _ = pure ()
 
 clockOfNode :: ClockingM m => Typed Node -> m (Clocked Node)
-clockOfNode n@MkNode{..} = do
-  varClocks <- mapM (\(n,_) -> (,) n <$> fresh) nodeVariables
+clockOfNode n@MkNode {..} = do
+  varClocks <- mapM (\(n, _) -> (,) n <$> fresh) nodeVariables
   withNames varClocks $ withNames (map (fmap (const Base)) $ nodeInputs <> nodeOutputs) $ do
     eqns' <- mapM clockOfEqn nodeEquations
 
-    return $ n { nodeEquations = eqns'}
+    return $ n { nodeEquations = eqns' }
 
 clockOfEqn :: ClockingM m => Typed Equation -> m (Clocked Equation)
 clockOfEqn (MkEq ty ids expr) = do
-  idClocks <- mapM lookupName ids
+  idClocks        <- mapM lookupName ids
   (e', expClocks) <- clockOfExpr expr
 
   toTuple idClocks `checkClock` expClocks
 
   pure (MkEq (ty, toTuple idClocks) ids e')
-  where toTuple (x :| []) = x
-        toTuple xss       = CTuple xss
+ where
+  toTuple (x :| []) = x
+  toTuple xss       = CTuple xss
 
 clockOfExpr :: ClockingM m => Expression -> m (Expression, Clock)
 clockOfExpr (Const c) = do
@@ -148,14 +146,14 @@ clockOfExpr (Var v) = do
   clk <- lookupName v
   pure (Var v, clk)
 clockOfExpr (When e c x) = do
-  xClk <- lookupName x
+  xClk      <- lookupName x
 
   (e', clk) <- clockOfExpr e
   checkClock xClk clk
 
   pure (When e' c x, On xClk c x)
 clockOfExpr (Merge x l r) = do
-  xClk <- lookupName x
+  xClk       <- lookupName x
 
   (l', lClk) <- clockOfExpr l
   checkClock (On xClk True x) lClk
@@ -167,7 +165,7 @@ clockOfExpr (Merge x l r) = do
 clockOfExpr (App f args a) = do
   lookupName a
   (args', clks) <- unzip <$> mapM clockOfExpr args
-  ck' <- fresh
+  ck'           <- fresh
   pure (App f args' a, ck')
 
 
