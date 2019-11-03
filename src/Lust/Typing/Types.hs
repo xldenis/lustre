@@ -119,6 +119,8 @@ addNode MkNode {..} = do
   modify $ \s -> MkE mempty [pair] <> s
  where
 
+-- | Type Checking Nodes, Equations and Expressions
+
 typecheckNodes :: TypecheckM m => [PreNode] -> m [Typed Node]
 typecheckNodes = mapM (\n -> typecheckNode n <* addNode n)
 
@@ -141,10 +143,6 @@ typecheckEqn (MkEq () ids expr) = do
  where
   fromTTuple (TTuple xs) = xs
   fromTTuple ty          = ty :| []
-
-{-| Produce the types returned by an expression. The only way to get more than one type out
-    is when an application returns more than one output
--}
 
 checkType :: TypecheckM m => Type -> Type -> m ()
 checkType expected given = case given of
